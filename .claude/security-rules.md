@@ -15,6 +15,7 @@
   - access TTL 15분, refresh TTL 14일.
   - refresh **rotation 필수** (사용 즉시 무효화 + 새 발급).
   - refresh는 httpOnly + secure (앱에선 Keychain/Keystore).
+  - access token에 **`jti` 클레임 필수** (UUIDv7 또는 randomBytes). 초단위 iat 충돌 방지 + revocation 추적 기반.
 - 로그인 실패 5회 → 15분 잠금 (Redis TTL).
 
 ## 입력 검증

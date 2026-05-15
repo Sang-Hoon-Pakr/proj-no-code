@@ -38,3 +38,9 @@
 
 - 새 npm 패키지 추가 전 사용자에게 확인. 번들 사이즈 영향 클 수 있음.
 - date 처리: `date-fns` 사용. `moment` 금지.
+
+## SQL 트랜잭션
+
+- self-reference FK가 있는 테이블: 트랜잭션 안에서 **참조 대상 row를 먼저 INSERT**한 뒤 참조하는 UPDATE/INSERT. PG의 FK 검증은 기본 IMMEDIATE.
+- 순서 강제 어렵다면 마이그레이션에 `DEFERRABLE INITIALLY DEFERRED` 명시.
+- 트랜잭션 안에서 발생한 에러는 반드시 ROLLBACK 후 throw. silent swallow 금지.
