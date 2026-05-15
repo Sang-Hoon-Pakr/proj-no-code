@@ -2,7 +2,6 @@ import { Inject, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
-  OnGatewayConnection,
   OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
@@ -43,7 +42,7 @@ interface JwtPayload {
   cors: { origin: '*' },
   transports: ['websocket'],
 })
-export class MessageGateway implements OnGatewayInit, OnGatewayConnection {
+export class MessageGateway implements OnGatewayInit {
   private readonly logger = new Logger(MessageGateway.name);
 
   @WebSocketServer()
@@ -55,30 +54,35 @@ export class MessageGateway implements OnGatewayInit, OnGatewayConnection {
     @Inject(JWT_SECRET_TOKEN) private readonly jwtSecret: string,
   ) {}
 
-  // realtime-rules.md: 핸드셰이크 단계 인증은 middleware (handleConnection은 연결 완료 후 호출).
+  // realtime-rules.md: 핸드셰이크 단계 인증 + fan-out에 영향 주는 setup(join 등)은
+  // 모두 미들웨어에서 완료. handleConnection은 클라이언트 `connect`와 race 가능.
   afterInit(server: Server): void {
     server.use((socket, next) => {
-      const token = this.extractTokenFromHandshake(socket);
-      if (!token) {
-        next(new Error('unauthorized'));
-        return;
-      }
-      try {
-        const payload = jwt.verify(token, this.jwtSecret) as JwtPayload;
-        (socket.data as SocketUserData) = { userId: payload.sub };
-        next();
-      } catch {
-        next(new Error('unauthorized'));
-      }
+      void this.authAndJoin(socket).then(
+        () => next(),
+        (err: Error) => next(err),
+      );
     });
   }
 
-  async handleConnection(client: Socket): Promise<void> {
-    const { userId } = client.data as SocketUserData;
-    // 사용자가 속한 모든 방의 Socket.IO room에 join — fan-out 채널.
+  private async authAndJoin(socket: Socket): Promise<void> {
+    const token = this.extractTokenFromHandshake(socket);
+    if (!token) throw new Error('unauthorized');
+
+    let userId: string;
+    try {
+      const payload = jwt.verify(token, this.jwtSecret) as JwtPayload;
+      userId = payload.sub;
+    } catch {
+      throw new Error('unauthorized');
+    }
+
+    (socket.data as SocketUserData) = { userId };
+
+    // 모든 방 join을 connect 이벤트 발화 전에 완료 — fan-out race 차단.
     const roomIds = await this.roomService.listRoomsForUser(userId);
     for (const roomId of roomIds) {
-      await client.join(roomId);
+      await socket.join(roomId);
     }
   }
 
