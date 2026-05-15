@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { MessageService } from './message.service';
 import { MessageGateway } from './message.gateway';
+import { MessageController } from './message.controller';
 import { PG_POOL } from '../config/database.module';
 import { AuthModule } from '../auth/auth.module'; // JWT_SECRET_TOKEN
 import { RoomModule } from '../room/room.module'; // RoomService
@@ -11,6 +12,7 @@ import { BlockService } from '../block/block.service';
 
 @Module({
   imports: [AuthModule, RoomModule, BlockModule],
+  controllers: [MessageController],
   providers: [
     {
       provide: MessageService,

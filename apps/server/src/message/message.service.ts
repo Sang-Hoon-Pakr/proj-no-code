@@ -25,6 +25,19 @@ export interface ListSinceInput {
   limit?: number;
 }
 
+export interface ListInRoomInput {
+  roomId: string;
+  userId: string;
+  before?: number; // 이 seq보다 작은 메시지 (exclusive cursor)
+  limit?: number;
+}
+
+export interface ListInRoomOutput {
+  messages: Message[];
+  hasMore: boolean;
+  nextBefore: number | null;
+}
+
 export class NotInRoomError extends Error {
   constructor() {
     // security-rules.md: 404와 403 누설 방지 — non-member도 non-existent도 같은 에러로 통일.
@@ -141,6 +154,39 @@ export class MessageService {
 
     const messages = rows.map(rowToMessage);
     return { messages, hasMore: messages.length === limit };
+  }
+
+  // 방 메시지 히스토리 — DESC 순서, before(exclusive) cursor 페이지네이션.
+  // 채팅 UI에서 방 진입 시 최근부터 보여주고, 위로 스크롤하면 다음 페이지 호출.
+  async listInRoom(input: ListInRoomInput): Promise<ListInRoomOutput> {
+    if (!(await this.roomService.isMember(input.roomId, input.userId))) {
+      throw new NotInRoomError();
+    }
+    const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+
+    const params: unknown[] = [input.roomId];
+    let cursorCondition = '';
+    if (input.before !== undefined && input.before > 0) {
+      params.push(input.before);
+      cursorCondition = `AND seq < $${params.length}`;
+    }
+    params.push(limit + 1);
+
+    const { rows } = await this.pool.query<MessageRow>(
+      `SELECT id, room_id, sender_id, content, seq, created_at
+       FROM messages
+       WHERE room_id = $1 ${cursorCondition}
+       ORDER BY seq DESC
+       LIMIT $${params.length}`,
+      params,
+    );
+
+    const hasMore = rows.length > limit;
+    const slice = hasMore ? rows.slice(0, limit) : rows;
+    const messages = slice.map(rowToMessage);
+    const nextBefore = hasMore && messages.length > 0 ? messages[messages.length - 1].seq : null;
+
+    return { messages, hasMore, nextBefore };
   }
 
   // realtime-rules.md: lastReadSeq 단조증가만 허용 — 클라이언트가 잘못 작은 seq 보내도 무영향.
