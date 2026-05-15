@@ -1,0 +1,31 @@
+{
+  "name": "proj-no-code",
+  "version": "0.0.0",
+  "private": true,
+  "description": "카카오톡형 모바일 메신저 모노레포",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "verify": "pnpm lint && pnpm typecheck && pnpm test",
+    "lint": "pnpm -r --if-present run lint",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "test": "pnpm -r --if-present run test",
+    "test:unit": "pnpm -r --if-present run test:unit",
+    "test:integration": "pnpm -r --if-present run test:integration",
+    "test:e2e": "pnpm -r --if-present run test:e2e",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,json,md,yml,yaml,js,mjs,cjs}": "prettier --write"
+  }
+}

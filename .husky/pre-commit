@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+# Pre-commit: 빠른 검증만. 사이클의 첫 관문.
+# 정책은 .claude/workflow.md 와 .claude/environment-rules.md 참조.
+
+set -e
+
+echo "[pre-commit] lint-staged (prettier on staged)"
+pnpm exec lint-staged
+
+echo "[pre-commit] full lint"
+pnpm lint
+
+echo "[pre-commit] typecheck"
+pnpm typecheck
+
+echo "[pre-commit] OK"

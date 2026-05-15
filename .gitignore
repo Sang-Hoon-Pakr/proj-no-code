@@ -1,0 +1,37 @@
+# Claude (per-repo personal — 팀 공유 금지)
+CLAUDE.local.md
+.claude/settings.local.json
+
+# 환경변수
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+*.log
+.DS_Store
+
+# 빌드 산출물
+dist/
+build/
+*.tsbuildinfo
+
+# 모바일 빌드
+ios/Pods/
+ios/build/
+android/.gradle/
+android/build/
+android/app/build/
+*.keystore
+!debug.keystore
+
+# 테스트
+coverage/
+.nyc_output/
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json

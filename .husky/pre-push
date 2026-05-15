@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# Pre-push: 단위 테스트 게이트.
+# Testcontainers를 쓰는 integration은 CI에서만 (로컬 Docker 가용성 가정 X).
+
+set -e
+
+echo "[pre-push] unit tests"
+pnpm test:unit
+
+echo "[pre-push] OK"
