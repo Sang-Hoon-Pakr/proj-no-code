@@ -7,6 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { PG_POOL } from '../../src/config/database.module';
 import { setupApp } from '../../src/setup-app';
+import { setupTestDb } from '../setup/test-db';
 
 const PG_IMAGE = 'postgres:16-alpine';
 const CONTAINER_START_TIMEOUT_MS = 60_000;
@@ -19,24 +20,7 @@ describe('Auth HTTP', () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer(PG_IMAGE).start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
-    await pool.query(`
-      CREATE TABLE users (
-        id            UUID PRIMARY KEY,
-        email         TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE refresh_tokens (
-        id          UUID PRIMARY KEY,
-        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        family_id   UUID NOT NULL,
-        token_hash  TEXT NOT NULL UNIQUE,
-        expires_at  TIMESTAMPTZ NOT NULL,
-        used_at     TIMESTAMPTZ,
-        replaced_by UUID REFERENCES refresh_tokens(id),
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-    `);
+    await setupTestDb(pool);
 
     process.env.JWT_SECRET = 'test-secret-for-jwt-signing-do-not-use-in-prod';
 
