@@ -4,23 +4,33 @@ import { Pool } from 'pg';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import type Redis from 'ioredis';
+import type { StartedRedisContainer } from '@testcontainers/redis';
 import { AppModule } from '../../src/app.module';
 import { PG_POOL } from '../../src/config/database.module';
+import { REDIS_CLIENT } from '../../src/config/redis.module';
 import { setupApp } from '../../src/setup-app';
 import { setupTestDb } from '../setup/test-db';
+import { startRedis } from '../setup/test-redis';
 
 const PG_IMAGE = 'postgres:16-alpine';
 const CONTAINER_START_TIMEOUT_MS = 60_000;
 
 describe('Auth HTTP', () => {
-  let container: StartedPostgreSqlContainer;
+  let pgContainer: StartedPostgreSqlContainer;
+  let redisContainer: StartedRedisContainer;
   let pool: Pool;
+  let redis: Redis;
   let app: INestApplication;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(PG_IMAGE).start();
-    pool = new Pool({ connectionString: container.getConnectionUri() });
+    pgContainer = await new PostgreSqlContainer(PG_IMAGE).start();
+    pool = new Pool({ connectionString: pgContainer.getConnectionUri() });
     await setupTestDb(pool);
+
+    const r = await startRedis();
+    redisContainer = r.container;
+    redis = r.client;
 
     process.env.JWT_SECRET = 'test-secret-for-jwt-signing-do-not-use-in-prod';
 
@@ -29,6 +39,8 @@ describe('Auth HTTP', () => {
     })
       .overrideProvider(PG_POOL)
       .useValue(pool)
+      .overrideProvider(REDIS_CLIENT)
+      .useValue(redis)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -39,11 +51,14 @@ describe('Auth HTTP', () => {
   afterAll(async () => {
     await app?.close();
     await pool?.end();
-    await container?.stop();
+    await pgContainer?.stop();
+    await redis?.quit();
+    await redisContainer?.stop();
   });
 
   beforeEach(async () => {
     await pool.query('TRUNCATE refresh_tokens, users CASCADE');
+    await redis.flushall();
   });
 
   describe('POST /api/v1/auth/register', () => {
@@ -164,6 +179,42 @@ describe('Auth HTTP', () => {
 
       expect(r.status).toBe(401);
       expect(r.body.detail.code).toBe('INVALID_REFRESH_TOKEN');
+    });
+  });
+
+  describe('rate limit (IP당 분당 10회)', () => {
+    it('returns 429 with Retry-After + detail.retryAfter on 11th request', async () => {
+      // 10번 호출 (제한 내 — 422/201 응답이지만 카운터는 증가)
+      for (let i = 0; i < 10; i++) {
+        await request(app.getHttpServer())
+          .post('/api/v1/auth/register')
+          .send({ email: `u${i}@example.com`, password: 'password123' });
+      }
+
+      // 11번째 — 429
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({ email: 'u11@example.com', password: 'password123' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.detail.code).toBe('RATE_LIMITED');
+      expect(res.body.detail.retryAfter).toBeGreaterThan(0);
+      expect(res.headers['retry-after']).toBeTruthy();
+    });
+
+    it('limit is per-window — flushall (= TTL expiry) resets counter', async () => {
+      for (let i = 0; i < 10; i++) {
+        await request(app.getHttpServer())
+          .post('/api/v1/auth/register')
+          .send({ email: `a${i}@example.com`, password: 'password123' });
+      }
+
+      await redis.flushall();
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({ email: 'new@example.com', password: 'password123' });
+      expect(res.status).toBe(201);
     });
   });
 });

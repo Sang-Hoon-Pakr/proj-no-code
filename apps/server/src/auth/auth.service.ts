@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import type { Pool } from 'pg';
 import { uuidv7 } from 'uuidv7';
 import { z } from 'zod';
+import type { BruteForceProtector } from './brute-force';
 
 // security-rules.md: 15분 access TTL, 14일 refresh TTL.
 const ACCESS_TTL_SEC = 15 * 60;
@@ -90,6 +91,7 @@ export class AuthService {
   constructor(
     private readonly pool: Pool,
     private readonly jwtSecret: string,
+    private readonly bruteForce: BruteForceProtector,
   ) {}
 
   async register(input: { email: string; password: string }): Promise<User> {
@@ -116,21 +118,32 @@ export class AuthService {
   async login(input: { email: string; password: string }): Promise<TokenPair> {
     const parsed = LoginSchema.safeParse(input);
     if (!parsed.success) throw new InvalidCredentialsError();
+    const email = parsed.data.email;
+
+    // security-rules.md: 잠금 상태에선 비밀번호 검증조차 안 함. 응답은 일반 invalid (정보 누설 X).
+    if (await this.bruteForce.isLockedOut(email)) {
+      throw new InvalidCredentialsError();
+    }
 
     const { rows } = await this.pool.query<UserRow>(
       `SELECT id, email, password_hash, created_at FROM users WHERE email = $1`,
-      [parsed.data.email],
+      [email],
     );
 
     if (rows.length === 0) {
       // 타이밍 오라클 방지: 미존재 사용자도 hash 한 번 수행.
       await hash(parsed.data.password, ARGON2_OPTS);
+      await this.bruteForce.recordFailure(email);
       throw new InvalidCredentialsError();
     }
 
     const valid = await verify(rows[0].password_hash, parsed.data.password);
-    if (!valid) throw new InvalidCredentialsError();
+    if (!valid) {
+      await this.bruteForce.recordFailure(email);
+      throw new InvalidCredentialsError();
+    }
 
+    await this.bruteForce.reset(email);
     return this.issueInitialPair(rows[0].id);
   }
 

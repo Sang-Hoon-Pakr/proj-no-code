@@ -1,5 +1,6 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { AuthService, type TokenPair, type User } from './auth.service';
+import { AuthRateLimitGuard } from './auth-rate-limit.guard';
 
 interface RegisterBody {
   email?: unknown;
@@ -14,6 +15,7 @@ interface RefreshBody {
 }
 
 @Controller('auth')
+@UseGuards(AuthRateLimitGuard)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 

@@ -6,10 +6,14 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { io as ioClient, type Socket as ClientSocket } from 'socket.io-client';
 import { uuidv7 } from 'uuidv7';
+import type Redis from 'ioredis';
+import type { StartedRedisContainer } from '@testcontainers/redis';
 import { AppModule } from '../../src/app.module';
 import { PG_POOL } from '../../src/config/database.module';
+import { REDIS_CLIENT } from '../../src/config/redis.module';
 import { setupApp } from '../../src/setup-app';
 import { setupTestDb } from '../setup/test-db';
+import { startRedis } from '../setup/test-redis';
 
 const PG_IMAGE = 'postgres:16-alpine';
 const CONTAINER_START_TIMEOUT_MS = 60_000;
@@ -46,15 +50,21 @@ interface SinceAckOk {
 type SinceAck = SinceAckOk | AckError;
 
 describe('Message WS Gateway', () => {
-  let container: StartedPostgreSqlContainer;
+  let pgContainer: StartedPostgreSqlContainer;
+  let redisContainer: StartedRedisContainer;
   let pool: Pool;
+  let redis: Redis;
   let app: INestApplication;
   let port: number;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(PG_IMAGE).start();
-    pool = new Pool({ connectionString: container.getConnectionUri() });
+    pgContainer = await new PostgreSqlContainer(PG_IMAGE).start();
+    pool = new Pool({ connectionString: pgContainer.getConnectionUri() });
     await setupTestDb(pool);
+
+    const r = await startRedis();
+    redisContainer = r.container;
+    redis = r.client;
 
     process.env.JWT_SECRET = 'test-secret-for-jwt-signing-do-not-use-in-prod';
 
@@ -63,6 +73,8 @@ describe('Message WS Gateway', () => {
     })
       .overrideProvider(PG_POOL)
       .useValue(pool)
+      .overrideProvider(REDIS_CLIENT)
+      .useValue(redis)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -75,13 +87,16 @@ describe('Message WS Gateway', () => {
   afterAll(async () => {
     await app?.close();
     await pool?.end();
-    await container?.stop();
+    await pgContainer?.stop();
+    await redis?.quit();
+    await redisContainer?.stop();
   });
 
   beforeEach(async () => {
     await pool.query(
       'TRUNCATE messages, direct_room_keys, room_members, rooms, blocks, refresh_tokens, users CASCADE',
     );
+    await redis.flushall();
   });
 
   async function registerAndLogin(email: string): Promise<AuthedUser> {

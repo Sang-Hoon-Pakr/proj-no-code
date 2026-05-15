@@ -15,6 +15,7 @@ import {
   SelfRoomError,
 } from '../room/room.service';
 import { NotInRoomError } from '../message/message.service';
+import { RateLimitError } from './errors';
 
 interface ErrorMapping {
   status: number;
@@ -36,6 +37,7 @@ const ERROR_MAP = new Map<new (...args: never[]) => Error, ErrorMapping>([
   [NotAuthorizedError, { status: 403, code: 'NOT_AUTHORIZED', title: 'Not authorized' }],
   [RoomNotFoundError, { status: 404, code: 'NOT_FOUND', title: 'Not found' }],
   [NotInRoomError, { status: 404, code: 'NOT_FOUND', title: 'Not found' }],
+  [RateLimitError, { status: 429, code: 'RATE_LIMITED', title: 'Too many requests' }],
 ]);
 
 @Catch()
@@ -49,6 +51,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     const mapping = this.findMapping(exception);
     if (mapping) {
+      // RateLimitError는 Retry-After 헤더 + detail.retryAfter 추가 (RFC 7231).
+      if (exception instanceof RateLimitError) {
+        response.setHeader('Retry-After', String(exception.retryAfterSec));
+        response.status(mapping.status).json({
+          type: 'about:blank',
+          title: mapping.title,
+          status: mapping.status,
+          detail: { code: mapping.code, retryAfter: exception.retryAfterSec },
+          instance: request.url,
+        });
+        return;
+      }
       this.respond(response, request, mapping);
       return;
     }
