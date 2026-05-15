@@ -26,6 +26,8 @@
 
 - Testcontainers 사용 — 로컬에 Docker daemon 실행 중이어야 함.
 - 이미지 태그 명시 (`postgres:16-alpine`). `latest` 금지.
+- **통합테스트 스크립트는 진입 시 daemon 사전검사 필수** (`scripts/check-docker.mjs`).
+  daemon down이면 명확한 안내 메시지와 함께 즉시 종료. 추측 에러로 디버깅 시간 낭비 금지.
 
 ## 격리
 
