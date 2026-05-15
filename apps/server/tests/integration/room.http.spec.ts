@@ -1,0 +1,270 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { Pool } from 'pg';
+import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { AppModule } from '../../src/app.module';
+import { PG_POOL } from '../../src/config/database.module';
+import { setupApp } from '../../src/setup-app';
+
+const PG_IMAGE = 'postgres:16-alpine';
+const CONTAINER_START_TIMEOUT_MS = 60_000;
+
+interface AuthedUser {
+  userId: string;
+  accessToken: string;
+  email: string;
+}
+
+describe('Room HTTP', () => {
+  let container: StartedPostgreSqlContainer;
+  let pool: Pool;
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    container = await new PostgreSqlContainer(PG_IMAGE).start();
+    pool = new Pool({ connectionString: container.getConnectionUri() });
+    await pool.query(`
+      CREATE TABLE users (
+        id            UUID PRIMARY KEY,
+        email         TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE refresh_tokens (
+        id          UUID PRIMARY KEY,
+        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        family_id   UUID NOT NULL,
+        token_hash  TEXT NOT NULL UNIQUE,
+        expires_at  TIMESTAMPTZ NOT NULL,
+        used_at     TIMESTAMPTZ,
+        replaced_by UUID REFERENCES refresh_tokens(id),
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE blocks (
+        blocker_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        blocked_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (blocker_id, blocked_id)
+      );
+      CREATE TABLE rooms (
+        id          UUID PRIMARY KEY,
+        type        TEXT NOT NULL CHECK (type IN ('direct', 'group')),
+        name        TEXT,
+        created_by  UUID NOT NULL REFERENCES users(id),
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE room_members (
+        room_id        UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        user_id        UUID NOT NULL REFERENCES users(id),
+        role           TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
+        joined_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_read_seq  BIGINT NOT NULL DEFAULT 0,
+        PRIMARY KEY (room_id, user_id)
+      );
+      CREATE TABLE direct_room_keys (
+        user_a_id  UUID NOT NULL,
+        user_b_id  UUID NOT NULL,
+        room_id    UUID NOT NULL UNIQUE REFERENCES rooms(id) ON DELETE CASCADE,
+        PRIMARY KEY (user_a_id, user_b_id),
+        CHECK (user_a_id < user_b_id)
+      );
+    `);
+
+    process.env.JWT_SECRET = 'test-secret-for-jwt-signing-do-not-use-in-prod';
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(PG_POOL)
+      .useValue(pool)
+      .compile();
+
+    app = moduleRef.createNestApplication();
+    setupApp(app);
+    await app.init();
+  }, CONTAINER_START_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await app?.close();
+    await pool?.end();
+    await container?.stop();
+  });
+
+  beforeEach(async () => {
+    await pool.query(
+      'TRUNCATE direct_room_keys, room_members, rooms, blocks, refresh_tokens, users CASCADE',
+    );
+  });
+
+  async function registerAndLogin(email: string): Promise<AuthedUser> {
+    const reg = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email, password: 'password123' });
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password: 'password123' });
+    return {
+      userId: reg.body.data.id,
+      accessToken: login.body.data.accessToken,
+      email,
+    };
+  }
+
+  describe('POST /api/v1/rooms/direct (auth required)', () => {
+    it('returns 401 without Authorization header', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/rooms/direct')
+        .send({ otherUserId: '00000000-0000-7000-8000-000000000001' });
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 401 with malformed token', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/rooms/direct')
+        .set('Authorization', 'Bearer not-a-real-token')
+        .send({ otherUserId: '00000000-0000-7000-8000-000000000001' });
+      expect(res.status).toBe(401);
+    });
+
+    it('creates direct room with current user + otherUserId', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/rooms/direct')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ otherUserId: bob.userId });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.type).toBe('direct');
+      expect(res.body.data.id).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    it('same pair twice → same room', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+
+      const r1 = await request(app.getHttpServer())
+        .post('/api/v1/rooms/direct')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ otherUserId: bob.userId });
+      const r2 = await request(app.getHttpServer())
+        .post('/api/v1/rooms/direct')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ otherUserId: bob.userId });
+
+      expect(r2.body.data.id).toBe(r1.body.data.id);
+    });
+
+    it('self → 422', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/rooms/direct')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ otherUserId: alice.userId });
+      expect(res.status).toBe(422);
+      expect(res.body.detail.code).toBe('SELF_ROOM');
+    });
+  });
+
+  describe('POST /api/v1/rooms/group', () => {
+    it('returns 200 + room with creator as admin', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/rooms/group')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ name: '점심팟', memberIds: [bob.userId] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.type).toBe('group');
+      expect(res.body.data.name).toBe('점심팟');
+    });
+
+    it('returns 401 without auth', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/rooms/group')
+        .send({ name: 'x', memberIds: [] });
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('POST /api/v1/rooms/:id/members', () => {
+    it('admin can add member → 204', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const charlie = await registerAndLogin('charlie@example.com');
+
+      const create = await request(app.getHttpServer())
+        .post('/api/v1/rooms/group')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ name: 'g', memberIds: [bob.userId] });
+      const roomId = create.body.data.id;
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/v1/rooms/${roomId}/members`)
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ userId: charlie.userId });
+
+      expect(res.status).toBe(204);
+    });
+
+    it('non-admin → 403', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const charlie = await registerAndLogin('charlie@example.com');
+
+      const create = await request(app.getHttpServer())
+        .post('/api/v1/rooms/group')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ name: 'g', memberIds: [bob.userId] });
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/v1/rooms/${create.body.data.id}/members`)
+        .set('Authorization', `Bearer ${bob.accessToken}`)
+        .send({ userId: charlie.userId });
+
+      expect(res.status).toBe(403);
+      expect(res.body.detail.code).toBe('NOT_AUTHORIZED');
+    });
+
+    it('non-existent room → 404', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const charlie = await registerAndLogin('charlie@example.com');
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/v1/rooms/00000000-0000-7000-8000-000000000999/members`)
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ userId: charlie.userId });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('POST /api/v1/rooms/:id/leave', () => {
+    it('removes the user from room → 204', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+
+      const create = await request(app.getHttpServer())
+        .post('/api/v1/rooms/group')
+        .set('Authorization', `Bearer ${alice.accessToken}`)
+        .send({ name: 'g', memberIds: [bob.userId] });
+      const roomId = create.body.data.id;
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/v1/rooms/${roomId}/leave`)
+        .set('Authorization', `Bearer ${bob.accessToken}`);
+
+      expect(res.status).toBe(204);
+
+      const { rowCount } = await pool.query(
+        'SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2',
+        [roomId, bob.userId],
+      );
+      expect(rowCount).toBe(0);
+    });
+  });
+});
