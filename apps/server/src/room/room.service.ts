@@ -241,6 +241,14 @@ export class RoomService {
     return rows.map((r) => r.room_id);
   }
 
+  async listMemberIds(roomId: string): Promise<string[]> {
+    const { rows } = await this.pool.query<{ user_id: string }>(
+      `SELECT user_id FROM room_members WHERE room_id = $1`,
+      [roomId],
+    );
+    return rows.map((r) => r.user_id);
+  }
+
   async listForUser(input: ListRoomsInput): Promise<ListRoomsOutput> {
     const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIST_LIMIT, 1), MAX_LIST_LIMIT);
     const cursor = input.cursor ? decodeCursor(input.cursor) : null;
