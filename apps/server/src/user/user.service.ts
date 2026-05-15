@@ -65,6 +65,16 @@ export class UserService {
     return rowToProfile(rows[0]);
   }
 
+  // 이메일 정확 일치 검색 (대소문자 무관). 부분 일치/닉네임 검색은 개인정보 정책 결정 후 추가.
+  async findByEmail(email: string): Promise<UserProfile | null> {
+    const { rows } = await this.pool.query<UserProfileRow>(
+      `SELECT id, email, nickname, profile_image_url, status_message, created_at
+       FROM users WHERE LOWER(email) = LOWER($1)`,
+      [email],
+    );
+    return rows.length === 0 ? null : rowToProfile(rows[0]);
+  }
+
   async updateProfile(userId: string, input: unknown): Promise<UserProfile> {
     const parsed = UpdateProfileSchema.safeParse(input);
     if (!parsed.success) throw new ProfileValidationError(parsed.error.message);
