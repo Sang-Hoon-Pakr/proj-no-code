@@ -44,3 +44,8 @@
 - self-reference FK가 있는 테이블: 트랜잭션 안에서 **참조 대상 row를 먼저 INSERT**한 뒤 참조하는 UPDATE/INSERT. PG의 FK 검증은 기본 IMMEDIATE.
 - 순서 강제 어렵다면 마이그레이션에 `DEFERRABLE INITIALLY DEFERRED` 명시.
 - 트랜잭션 안에서 발생한 에러는 반드시 ROLLBACK 후 throw. silent swallow 금지.
+
+## NestJS DI
+
+- factory provider의 `inject` 배열: 클래스로 export된 provider는 **클래스 토큰 그대로**(`RoomService`), Symbol/string 토큰은 export된 그 토큰 자체 사용. 문자열 fallback 금지 (런타임 lookup 실패).
+- 동일 토큰을 두 모듈에서 provide 금지 — `@Global()` 또는 단일 모듈에서 export.

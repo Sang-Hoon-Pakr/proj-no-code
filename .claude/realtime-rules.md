@@ -2,7 +2,8 @@
 
 ## 연결 수명주기
 
-- 연결 시 `auth` 이벤트로 JWT 검증. 실패하면 즉시 disconnect (no retry).
+- 연결 시 JWT 검증 + **fan-out에 영향 주는 모든 setup (room join, presence 등록)** 은 **`afterInit`의 미들웨어에서 완료**. `handleConnection`은 클라이언트 `connect` 이벤트와 race 가능 — fan-out 의존 setup 금지.
+- 미들웨어 거부는 `next(new Error(...))` → 클라이언트 `connect_error` 이벤트로 핸드셰이크 단계에서 차단.
 - 핑/퐁 주기 25초 (Socket.IO 기본). 무응답 60초 → 서버가 끊음.
 - 클라이언트는 백그라운드 진입 시 연결 유지 시도하지 말고 정리. foreground 복귀 시 재연결.
 

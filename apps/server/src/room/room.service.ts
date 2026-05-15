@@ -195,6 +195,14 @@ export class RoomService {
     return (rowCount ?? 0) > 0;
   }
 
+  async listRoomsForUser(userId: string): Promise<string[]> {
+    const { rows } = await this.pool.query<{ room_id: string }>(
+      `SELECT room_id FROM room_members WHERE user_id = $1`,
+      [userId],
+    );
+    return rows.map((r) => r.room_id);
+  }
+
   async leave(input: LeaveInput): Promise<void> {
     await this.pool.query(`DELETE FROM room_members WHERE room_id = $1 AND user_id = $2`, [
       input.roomId,
