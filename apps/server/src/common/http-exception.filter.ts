@@ -17,6 +17,7 @@ import {
 import { NotInRoomError } from '../message/message.service';
 import { ProfileValidationError, UserNotFoundError } from '../user/user.service';
 import { BlockSelfError } from '../block/block.service';
+import { DeviceValidationError } from '../push/device.service';
 import { RateLimitError } from './errors';
 
 interface ErrorMapping {
@@ -41,6 +42,7 @@ const ERROR_MAP = new Map<new (...args: never[]) => Error, ErrorMapping>([
   [NotInRoomError, { status: 404, code: 'NOT_FOUND', title: 'Not found' }],
   [UserNotFoundError, { status: 404, code: 'NOT_FOUND', title: 'Not found' }],
   [ProfileValidationError, { status: 422, code: 'VALIDATION', title: 'Validation failed' }],
+  [DeviceValidationError, { status: 422, code: 'VALIDATION', title: 'Validation failed' }],
   [BlockSelfError, { status: 422, code: 'BLOCK_SELF', title: 'Cannot block self' }],
   [RateLimitError, { status: 429, code: 'RATE_LIMITED', title: 'Too many requests' }],
 ]);

@@ -11,6 +11,7 @@ import jwt from 'jsonwebtoken';
 import type { Server, Socket } from 'socket.io';
 import { JWT_SECRET_TOKEN } from '../common/jwt.guard';
 import { RoomService } from '../room/room.service';
+import { PushService } from '../push/push.service';
 import { MessageService, NotInRoomError } from './message.service';
 
 interface MessageSendPayload {
@@ -80,6 +81,7 @@ export class MessageGateway implements OnGatewayInit {
   constructor(
     private readonly messageService: MessageService,
     private readonly roomService: RoomService,
+    private readonly pushService: PushService,
     @Inject(JWT_SECRET_TOKEN) private readonly jwtSecret: string,
   ) {}
 
@@ -134,6 +136,9 @@ export class MessageGateway implements OnGatewayInit {
 
       // fan-out: 본인 제외, 같은 방의 다른 소켓.
       client.to(msg.roomId).emit('message:new', this.toDto(msg));
+
+      // 오프라인 멤버에게는 push. fire-and-forget — push 실패가 ack를 막지 않음.
+      void this.pushToOfflineMembers(msg.roomId, msg.id, userId);
 
       return {
         ok: true,
@@ -196,6 +201,39 @@ export class MessageGateway implements OnGatewayInit {
       }
       this.logger.error(e);
       return { ok: false, error: { code: 'INTERNAL', message: 'internal' } };
+    }
+  }
+
+  private async pushToOfflineMembers(
+    roomId: string,
+    messageId: string,
+    senderId: string,
+  ): Promise<void> {
+    try {
+      const memberIds = await this.roomService.listMemberIds(roomId);
+      const sockets = await this.server.in(roomId).fetchSockets();
+      const onlineUserIds = new Set<string>();
+      for (const s of sockets) {
+        const data = s.data as Partial<SocketUserData>;
+        if (data.userId) onlineUserIds.add(data.userId);
+      }
+      const offlineTargets = memberIds.filter((uid) => uid !== senderId && !onlineUserIds.has(uid));
+      if (offlineTargets.length === 0) return;
+
+      // security-rules.md + mobile-rules.md: 푸시 페이로드에 메시지 본문 포함 금지.
+      const payload = {
+        notification: { title: '새 메시지', body: '새 메시지' },
+        data: { roomId, messageId, senderId },
+      };
+      await Promise.all(
+        offlineTargets.map((uid) =>
+          this.pushService.sendToUser(uid, payload).catch((e) => {
+            this.logger.warn(`pushToOfflineMembers user=${uid} error=${e}`);
+          }),
+        ),
+      );
+    } catch (e) {
+      this.logger.warn(`pushToOfflineMembers ${e}`);
     }
   }
 

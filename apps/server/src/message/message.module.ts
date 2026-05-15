@@ -9,9 +9,10 @@ import { RoomModule } from '../room/room.module'; // RoomService
 import { RoomService } from '../room/room.service';
 import { BlockModule } from '../block/block.module';
 import { BlockService } from '../block/block.service';
+import { PushModule } from '../push/push.module';
 
 @Module({
-  imports: [AuthModule, RoomModule, BlockModule],
+  imports: [AuthModule, RoomModule, BlockModule, PushModule],
   controllers: [MessageController],
   providers: [
     {
