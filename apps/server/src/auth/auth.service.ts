@@ -100,13 +100,15 @@ export class AuthService {
 
     const id = uuidv7();
     const passwordHash = await hash(parsed.data.password, ARGON2_OPTS);
+    // 닉네임 기본값: 이메일 prefix (사용자가 PATCH /users/me로 갱신 가능).
+    const defaultNickname = parsed.data.email.split('@')[0].slice(0, 50);
 
     try {
       const { rows } = await this.pool.query<UserRow>(
-        `INSERT INTO users (id, email, password_hash)
-         VALUES ($1, $2, $3)
+        `INSERT INTO users (id, email, password_hash, nickname)
+         VALUES ($1, $2, $3, $4)
          RETURNING id, email, password_hash, created_at`,
-        [id, parsed.data.email, passwordHash],
+        [id, parsed.data.email, passwordHash, defaultNickname],
       );
       return { id: rows[0].id, email: rows[0].email, createdAt: rows[0].created_at };
     } catch (e) {
