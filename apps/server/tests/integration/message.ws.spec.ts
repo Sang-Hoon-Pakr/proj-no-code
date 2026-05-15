@@ -48,6 +48,7 @@ interface SinceAckOk {
   data: { messages: MessageDto[]; hasMore: boolean };
 }
 type SinceAck = SinceAckOk | AckError;
+type ReadAck = { ok: true } | AckError;
 
 describe('Message WS Gateway', () => {
   let pgContainer: StartedPostgreSqlContainer;
@@ -412,6 +413,53 @@ describe('Message WS Gateway', () => {
 
       aliceSocket.close();
       bobSocket.close();
+    });
+  });
+
+  describe('read:mark (읽음 처리)', () => {
+    it('updates last_read_seq for the calling user', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const roomId = await createDirectRoom(alice, bob);
+
+      const aliceSocket = await connectSocket(alice.accessToken);
+      // alice가 3건 보냄
+      for (let i = 0; i < 3; i++) {
+        await emitWithAck<Ack>(aliceSocket, 'message:send', {
+          messageId: uuidv7(),
+          roomId,
+          content: `m${i}`,
+        });
+      }
+
+      const bobSocket = await connectSocket(bob.accessToken);
+      const ack = await emitWithAck<ReadAck>(bobSocket, 'read:mark', { roomId, seq: 2 });
+
+      expect(ack.ok).toBe(true);
+
+      const { rows } = await pool.query<{ last_read_seq: string }>(
+        'SELECT last_read_seq FROM room_members WHERE room_id = $1 AND user_id = $2',
+        [roomId, bob.userId],
+      );
+      expect(Number(rows[0].last_read_seq)).toBe(2);
+
+      aliceSocket.close();
+      bobSocket.close();
+    });
+
+    it('non-member → NOT_FOUND error', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const charlie = await registerAndLogin('charlie@example.com');
+      const roomId = await createDirectRoom(alice, bob);
+
+      const charlieSocket = await connectSocket(charlie.accessToken);
+      const ack = await emitWithAck<ReadAck>(charlieSocket, 'read:mark', { roomId, seq: 1 });
+
+      expect(ack.ok).toBe(false);
+      if (!ack.ok) expect(ack.error.code).toBe('NOT_FOUND');
+
+      charlieSocket.close();
     });
   });
 });

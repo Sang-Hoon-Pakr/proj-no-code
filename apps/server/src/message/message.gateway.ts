@@ -25,6 +25,11 @@ interface MessagesSincePayload {
   limit?: number;
 }
 
+interface ReadMarkPayload {
+  roomId: string;
+  seq: number;
+}
+
 interface MessageDto {
   messageId: string;
   roomId: string;
@@ -46,8 +51,12 @@ interface AckError {
   ok: false;
   error: { code: string; message: string };
 }
+interface OkAck {
+  ok: true;
+}
 type SendAck = SendAckOk | AckError;
 type SinceAck = SinceAckOk | AckError;
+type ReadAck = OkAck | AckError;
 
 interface SocketUserData {
   userId: string;
@@ -130,6 +139,28 @@ export class MessageGateway implements OnGatewayInit {
         ok: true,
         data: { messageId: msg.id, seq: msg.seq, createdAt: msg.createdAt.toISOString() },
       };
+    } catch (e) {
+      if (e instanceof NotInRoomError) {
+        return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
+      }
+      this.logger.error(e);
+      return { ok: false, error: { code: 'INTERNAL', message: 'internal' } };
+    }
+  }
+
+  @SubscribeMessage('read:mark')
+  async handleReadMark(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: ReadMarkPayload,
+  ): Promise<ReadAck> {
+    const { userId } = client.data as SocketUserData;
+    try {
+      await this.messageService.markRead({
+        roomId: payload.roomId,
+        userId,
+        seq: payload.seq,
+      });
+      return { ok: true };
     } catch (e) {
       if (e instanceof NotInRoomError) {
         return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
