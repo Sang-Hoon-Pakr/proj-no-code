@@ -59,12 +59,15 @@ START → IMPLEMENT → TEST ──pass──→ STAGE DONE
 
 - pass까지 4~6 반복. 같은 실패가 3번 반복되면 작업 단위가 너무 커진 것 — 분할 필요.
 
-## 자동화 훅 (Husky로 적용됨)
+## 자동화 훅 (적용 완료)
 
 - **pre-commit** ([.husky/pre-commit](../.husky/pre-commit)): `lint-staged` (prettier) → `pnpm lint` → `pnpm typecheck`.
-- **pre-push** ([.husky/pre-push](../.husky/pre-push)): `pnpm test:unit` (단위 테스트). integration은 Docker 의존이라 CI에서.
-- **CI**: 도입 시 전체 `pnpm verify` + coverage gate.
-- 훅 우회(`--no-verify`) 금지. 정 필요하면 별 branch + 사후 검증.
+- **pre-push** ([.husky/pre-push](../.husky/pre-push)): `pnpm test:unit` (단위 테스트). 통합 테스트는 Docker 의존이라 CI에서.
+- **CI** ([.github/workflows/ci.yml](../.github/workflows/ci.yml)): `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test` (통합 포함).
+  - push/PR to `main`에서 트리거.
+  - 같은 ref에서 새 push 시 이전 실행 자동 취소.
+  - main 브랜치 보호 룰로 CI 그린 강제 권장 (GitHub UI에서 설정).
+- 훅·CI 우회(`--no-verify`, GitHub admin override) 금지. 정 필요하면 별 branch + 사후 검증.
 - 실패 캡처는 **사람이 작성**. AI가 대신 채우면 이해 누락 위험.
 
 ## Stage 종료 체크리스트
