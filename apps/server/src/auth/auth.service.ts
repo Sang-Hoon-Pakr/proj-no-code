@@ -135,6 +135,10 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<TokenPair> {
+    // 컨트롤러에서 unknown 타입으로 들어올 수 있어 런타임 가드 — 빈 값/비문자열은 invalid로 통일.
+    if (typeof refreshToken !== 'string' || refreshToken.length === 0) {
+      throw new InvalidRefreshTokenError();
+    }
     const tokenHash = sha256Hex(refreshToken);
     const { rows } = await this.pool.query<RefreshRow>(
       `SELECT id, user_id, family_id, used_at, replaced_by, expires_at
