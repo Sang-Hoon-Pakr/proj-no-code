@@ -15,6 +15,7 @@ import {
   SelfRoomError,
 } from '../room/room.service';
 import { NotInRoomError } from '../message/message.service';
+import { ProfileValidationError, UserNotFoundError } from '../user/user.service';
 import { RateLimitError } from './errors';
 
 interface ErrorMapping {
@@ -37,6 +38,8 @@ const ERROR_MAP = new Map<new (...args: never[]) => Error, ErrorMapping>([
   [NotAuthorizedError, { status: 403, code: 'NOT_AUTHORIZED', title: 'Not authorized' }],
   [RoomNotFoundError, { status: 404, code: 'NOT_FOUND', title: 'Not found' }],
   [NotInRoomError, { status: 404, code: 'NOT_FOUND', title: 'Not found' }],
+  [UserNotFoundError, { status: 404, code: 'NOT_FOUND', title: 'Not found' }],
+  [ProfileValidationError, { status: 422, code: 'VALIDATION', title: 'Validation failed' }],
   [RateLimitError, { status: 429, code: 'RATE_LIMITED', title: 'Too many requests' }],
 ]);
 

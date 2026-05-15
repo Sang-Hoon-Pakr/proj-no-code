@@ -3,11 +3,12 @@ import { HealthController } from './health/health.controller';
 import { DatabaseModule } from './config/database.module';
 import { RedisModule } from './config/redis.module';
 import { AuthModule } from './auth/auth.module';
+import { UserModule } from './user/user.module';
 import { RoomModule } from './room/room.module';
 import { MessageModule } from './message/message.module';
 
 @Module({
-  imports: [DatabaseModule, RedisModule, AuthModule, RoomModule, MessageModule],
+  imports: [DatabaseModule, RedisModule, AuthModule, UserModule, RoomModule, MessageModule],
   controllers: [HealthController],
   providers: [],
 })
