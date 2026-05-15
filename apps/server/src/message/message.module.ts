@@ -6,15 +6,20 @@ import { PG_POOL } from '../config/database.module';
 import { AuthModule } from '../auth/auth.module'; // JWT_SECRET_TOKEN
 import { RoomModule } from '../room/room.module'; // RoomService
 import { RoomService } from '../room/room.service';
+import { BlockModule } from '../block/block.module';
+import { BlockService } from '../block/block.service';
 
 @Module({
-  imports: [AuthModule, RoomModule],
+  imports: [AuthModule, RoomModule, BlockModule],
   providers: [
     {
       provide: MessageService,
-      useFactory: (pool: Pool, roomService: RoomService): MessageService =>
-        new MessageService(pool, roomService),
-      inject: [PG_POOL, RoomService],
+      useFactory: (
+        pool: Pool,
+        roomService: RoomService,
+        blockService: BlockService,
+      ): MessageService => new MessageService(pool, roomService, blockService),
+      inject: [PG_POOL, RoomService, BlockService],
     },
     MessageGateway,
   ],

@@ -203,6 +203,19 @@ export class RoomService {
     return rows.map((r) => r.room_id);
   }
 
+  // 1:1방의 상대방 userId 반환. 그룹방이거나 미존재면 null.
+  async getDirectRoomOther(roomId: string, userId: string): Promise<string | null> {
+    const { rows } = await this.pool.query<{ user_id: string }>(
+      `SELECT rm.user_id
+       FROM rooms r
+       JOIN room_members rm ON rm.room_id = r.id
+       WHERE r.id = $1 AND r.type = 'direct' AND rm.user_id != $2
+       LIMIT 1`,
+      [roomId, userId],
+    );
+    return rows[0]?.user_id ?? null;
+  }
+
   async leave(input: LeaveInput): Promise<void> {
     await this.pool.query(`DELETE FROM room_members WHERE room_id = $1 AND user_id = $2`, [
       input.roomId,

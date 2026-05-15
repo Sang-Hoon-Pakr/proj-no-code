@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { uuidv7 } from 'uuidv7';
 import { MessageService, NotInRoomError } from '../../src/message/message.service';
 import { RoomService } from '../../src/room/room.service';
+import { BlockService } from '../../src/block/block.service';
 import { setupTestDb } from '../setup/test-db';
 
 const PG_IMAGE = 'postgres:16-alpine';
@@ -33,7 +34,7 @@ describe('MessageService — idempotency invariant', () => {
     pool = new Pool({ connectionString: container.getConnectionUri() });
     await setupTestDb(pool);
     roomService = new RoomService(pool);
-    messageService = new MessageService(pool, roomService);
+    messageService = new MessageService(pool, roomService, new BlockService(pool));
   }, CONTAINER_START_TIMEOUT_MS);
 
   afterAll(async () => {
