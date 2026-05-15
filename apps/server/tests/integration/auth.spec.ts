@@ -10,6 +10,7 @@ import {
   RefreshTokenReuseError,
   ValidationError,
 } from '../../src/auth/auth.service';
+import { setupTestDb } from '../setup/test-db';
 
 const PG_IMAGE = 'postgres:16-alpine';
 const CONTAINER_START_TIMEOUT_MS = 60_000;
@@ -23,25 +24,7 @@ describe('AuthService', () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer(PG_IMAGE).start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
-    await pool.query(`
-      CREATE TABLE users (
-        id            UUID PRIMARY KEY,
-        email         TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE refresh_tokens (
-        id          UUID PRIMARY KEY,
-        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        family_id   UUID NOT NULL,
-        token_hash  TEXT NOT NULL UNIQUE,
-        expires_at  TIMESTAMPTZ NOT NULL,
-        used_at     TIMESTAMPTZ,
-        replaced_by UUID REFERENCES refresh_tokens(id),
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE INDEX idx_refresh_tokens_family ON refresh_tokens (family_id);
-    `);
+    await setupTestDb(pool);
     service = new AuthService(pool, JWT_SECRET);
   }, CONTAINER_START_TIMEOUT_MS);
 

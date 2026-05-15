@@ -7,6 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { PG_POOL } from '../../src/config/database.module';
 import { setupApp } from '../../src/setup-app';
+import { setupTestDb } from '../setup/test-db';
 
 const PG_IMAGE = 'postgres:16-alpine';
 const CONTAINER_START_TIMEOUT_MS = 60_000;
@@ -25,53 +26,7 @@ describe('Room HTTP', () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer(PG_IMAGE).start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
-    await pool.query(`
-      CREATE TABLE users (
-        id            UUID PRIMARY KEY,
-        email         TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE refresh_tokens (
-        id          UUID PRIMARY KEY,
-        user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        family_id   UUID NOT NULL,
-        token_hash  TEXT NOT NULL UNIQUE,
-        expires_at  TIMESTAMPTZ NOT NULL,
-        used_at     TIMESTAMPTZ,
-        replaced_by UUID REFERENCES refresh_tokens(id),
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE blocks (
-        blocker_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        blocked_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (blocker_id, blocked_id)
-      );
-      CREATE TABLE rooms (
-        id          UUID PRIMARY KEY,
-        type        TEXT NOT NULL CHECK (type IN ('direct', 'group')),
-        name        TEXT,
-        created_by  UUID NOT NULL REFERENCES users(id),
-        last_seq    BIGINT NOT NULL DEFAULT 0,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE room_members (
-        room_id        UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-        user_id        UUID NOT NULL REFERENCES users(id),
-        role           TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'admin')),
-        joined_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_read_seq  BIGINT NOT NULL DEFAULT 0,
-        PRIMARY KEY (room_id, user_id)
-      );
-      CREATE TABLE direct_room_keys (
-        user_a_id  UUID NOT NULL,
-        user_b_id  UUID NOT NULL,
-        room_id    UUID NOT NULL UNIQUE REFERENCES rooms(id) ON DELETE CASCADE,
-        PRIMARY KEY (user_a_id, user_b_id),
-        CHECK (user_a_id < user_b_id)
-      );
-    `);
+    await setupTestDb(pool);
 
     process.env.JWT_SECRET = 'test-secret-for-jwt-signing-do-not-use-in-prod';
 
