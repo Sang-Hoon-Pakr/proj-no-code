@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Proj No Code",
+    "slug": "proj-no-code-mobile",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shpark.projnocode"
+    },
+    "android": {
+      "package": "com.shpark.projnocode"
+    },
+    "extra": {
+      "apiUrl": "http://localhost:3000/api/v1",
+      "wsUrl": "http://localhost:3000"
+    }
+  }
+}
