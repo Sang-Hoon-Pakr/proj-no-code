@@ -133,4 +133,34 @@ export class MessageService {
     const messages = rows.map(rowToMessage);
     return { messages, hasMore: messages.length === limit };
   }
+
+  // realtime-rules.md: lastReadSeq 단조증가만 허용 — 클라이언트가 잘못 작은 seq 보내도 무영향.
+  async markRead(input: { roomId: string; userId: string; seq: number }): Promise<void> {
+    if (!(await this.roomService.isMember(input.roomId, input.userId))) {
+      throw new NotInRoomError();
+    }
+    await this.pool.query(
+      `UPDATE room_members
+       SET last_read_seq = GREATEST(last_read_seq, $3)
+       WHERE room_id = $1 AND user_id = $2`,
+      [input.roomId, input.userId, input.seq],
+    );
+  }
+
+  async unreadCount(roomId: string, userId: string): Promise<number> {
+    if (!(await this.roomService.isMember(roomId, userId))) {
+      throw new NotInRoomError();
+    }
+    const { rows } = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::bigint AS count
+       FROM messages
+       WHERE room_id = $1
+         AND seq > COALESCE(
+           (SELECT last_read_seq FROM room_members WHERE room_id = $1 AND user_id = $2),
+           0
+         )`,
+      [roomId, userId],
+    );
+    return Number(rows[0].count);
+  }
 }
