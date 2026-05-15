@@ -53,6 +53,7 @@ describe('Room HTTP', () => {
         type        TEXT NOT NULL CHECK (type IN ('direct', 'group')),
         name        TEXT,
         created_by  UUID NOT NULL REFERENCES users(id),
+        last_seq    BIGINT NOT NULL DEFAULT 0,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE TABLE room_members (

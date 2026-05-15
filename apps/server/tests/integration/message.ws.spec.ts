@@ -21,7 +21,7 @@ interface AuthedUser {
 
 interface AckOk {
   ok: true;
-  data: { messageId: string; createdAt: string };
+  data: { messageId: string; seq: number; createdAt: string };
 }
 interface AckError {
   ok: false;
@@ -29,13 +29,20 @@ interface AckError {
 }
 type Ack = AckOk | AckError;
 
-interface MessageNewPayload {
+interface MessageDto {
   messageId: string;
   roomId: string;
   senderId: string;
   content: string;
+  seq: number;
   createdAt: string;
 }
+
+interface SinceAckOk {
+  ok: true;
+  data: { messages: MessageDto[]; hasMore: boolean };
+}
+type SinceAck = SinceAckOk | AckError;
 
 describe('Message WS Gateway', () => {
   let container: StartedPostgreSqlContainer;
@@ -74,6 +81,7 @@ describe('Message WS Gateway', () => {
         type        TEXT NOT NULL CHECK (type IN ('direct', 'group')),
         name        TEXT,
         created_by  UUID NOT NULL REFERENCES users(id),
+        last_seq    BIGINT NOT NULL DEFAULT 0,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE TABLE room_members (
@@ -96,7 +104,9 @@ describe('Message WS Gateway', () => {
         room_id     UUID NOT NULL REFERENCES rooms(id),
         sender_id   UUID NOT NULL REFERENCES users(id),
         content     TEXT NOT NULL,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        seq         BIGINT NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (room_id, seq)
       );
     `);
 
@@ -285,7 +295,7 @@ describe('Message WS Gateway', () => {
       const aliceSocket = await connectSocket(alice.accessToken);
       const bobSocket = await connectSocket(bob.accessToken);
 
-      const messagePromise = nextEvent<MessageNewPayload>(bobSocket, 'message:new');
+      const messagePromise = nextEvent<MessageDto>(bobSocket, 'message:new');
       const messageId = uuidv7();
       await emitWithAck<Ack>(aliceSocket, 'message:send', {
         messageId,
@@ -329,6 +339,118 @@ describe('Message WS Gateway', () => {
 
       aliceSocket.close();
       charlieSocket.close();
+    });
+  });
+
+  describe('messages:since (재연결 동기화)', () => {
+    it('returns messages with seq > sinceSeq in ascending order', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const roomId = await createDirectRoom(alice, bob);
+
+      const aliceSocket = await connectSocket(alice.accessToken);
+      // 3개 메시지 보냄 (seq 1, 2, 3)
+      for (let i = 0; i < 3; i++) {
+        await emitWithAck<Ack>(aliceSocket, 'message:send', {
+          messageId: uuidv7(),
+          roomId,
+          content: `m${i}`,
+        });
+      }
+
+      const bobSocket = await connectSocket(bob.accessToken);
+      const ack = await emitWithAck<SinceAck>(bobSocket, 'messages:since', {
+        roomId,
+        sinceSeq: 0,
+      });
+
+      expect(ack.ok).toBe(true);
+      if (ack.ok) {
+        expect(ack.data.messages.map((m) => m.seq)).toEqual([1, 2, 3]);
+        expect(ack.data.messages.map((m) => m.content)).toEqual(['m0', 'm1', 'm2']);
+        expect(ack.data.hasMore).toBe(false);
+      }
+
+      aliceSocket.close();
+      bobSocket.close();
+    });
+
+    it('respects sinceSeq cursor — only newer than cursor', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const roomId = await createDirectRoom(alice, bob);
+
+      const aliceSocket = await connectSocket(alice.accessToken);
+      for (let i = 0; i < 4; i++) {
+        await emitWithAck<Ack>(aliceSocket, 'message:send', {
+          messageId: uuidv7(),
+          roomId,
+          content: `m${i}`,
+        });
+      }
+
+      const bobSocket = await connectSocket(bob.accessToken);
+      const ack = await emitWithAck<SinceAck>(bobSocket, 'messages:since', {
+        roomId,
+        sinceSeq: 2,
+      });
+
+      expect(ack.ok).toBe(true);
+      if (ack.ok) {
+        expect(ack.data.messages.map((m) => m.seq)).toEqual([3, 4]);
+      }
+
+      aliceSocket.close();
+      bobSocket.close();
+    });
+
+    it('non-member → NOT_FOUND error', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const charlie = await registerAndLogin('charlie@example.com');
+      const roomId = await createDirectRoom(alice, bob);
+
+      const charlieSocket = await connectSocket(charlie.accessToken);
+      const ack = await emitWithAck<SinceAck>(charlieSocket, 'messages:since', {
+        roomId,
+        sinceSeq: 0,
+      });
+
+      expect(ack.ok).toBe(false);
+      if (!ack.ok) expect(ack.error.code).toBe('NOT_FOUND');
+
+      charlieSocket.close();
+    });
+
+    it('hasMore=true when limit is hit', async () => {
+      const alice = await registerAndLogin('alice@example.com');
+      const bob = await registerAndLogin('bob@example.com');
+      const roomId = await createDirectRoom(alice, bob);
+
+      const aliceSocket = await connectSocket(alice.accessToken);
+      for (let i = 0; i < 5; i++) {
+        await emitWithAck<Ack>(aliceSocket, 'message:send', {
+          messageId: uuidv7(),
+          roomId,
+          content: `m${i}`,
+        });
+      }
+
+      const bobSocket = await connectSocket(bob.accessToken);
+      const ack = await emitWithAck<SinceAck>(bobSocket, 'messages:since', {
+        roomId,
+        sinceSeq: 0,
+        limit: 3,
+      });
+
+      expect(ack.ok).toBe(true);
+      if (ack.ok) {
+        expect(ack.data.messages.length).toBe(3);
+        expect(ack.data.hasMore).toBe(true);
+      }
+
+      aliceSocket.close();
+      bobSocket.close();
     });
   });
 });
