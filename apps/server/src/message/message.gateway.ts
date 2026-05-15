@@ -19,15 +19,35 @@ interface MessageSendPayload {
   content: string;
 }
 
-interface AckOk {
+interface MessagesSincePayload {
+  roomId: string;
+  sinceSeq: number;
+  limit?: number;
+}
+
+interface MessageDto {
+  messageId: string;
+  roomId: string;
+  senderId: string;
+  content: string;
+  seq: number;
+  createdAt: string;
+}
+
+interface SendAckOk {
   ok: true;
-  data: { messageId: string; createdAt: string };
+  data: { messageId: string; seq: number; createdAt: string };
+}
+interface SinceAckOk {
+  ok: true;
+  data: { messages: MessageDto[]; hasMore: boolean };
 }
 interface AckError {
   ok: false;
   error: { code: string; message: string };
 }
-type Ack = AckOk | AckError;
+type SendAck = SendAckOk | AckError;
+type SinceAck = SinceAckOk | AckError;
 
 interface SocketUserData {
   userId: string;
@@ -90,7 +110,7 @@ export class MessageGateway implements OnGatewayInit {
   async handleMessageSend(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: MessageSendPayload,
-  ): Promise<Ack> {
+  ): Promise<SendAck> {
     const { userId } = client.data as SocketUserData;
     try {
       const msg = await this.messageService.create({
@@ -104,17 +124,11 @@ export class MessageGateway implements OnGatewayInit {
       await client.join(msg.roomId);
 
       // fan-out: 본인 제외, 같은 방의 다른 소켓.
-      client.to(msg.roomId).emit('message:new', {
-        messageId: msg.id,
-        roomId: msg.roomId,
-        senderId: msg.senderId,
-        content: msg.content,
-        createdAt: msg.createdAt.toISOString(),
-      });
+      client.to(msg.roomId).emit('message:new', this.toDto(msg));
 
       return {
         ok: true,
-        data: { messageId: msg.id, createdAt: msg.createdAt.toISOString() },
+        data: { messageId: msg.id, seq: msg.seq, createdAt: msg.createdAt.toISOString() },
       };
     } catch (e) {
       if (e instanceof NotInRoomError) {
@@ -123,6 +137,53 @@ export class MessageGateway implements OnGatewayInit {
       this.logger.error(e);
       return { ok: false, error: { code: 'INTERNAL', message: 'internal' } };
     }
+  }
+
+  @SubscribeMessage('messages:since')
+  async handleMessagesSince(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: MessagesSincePayload,
+  ): Promise<SinceAck> {
+    const { userId } = client.data as SocketUserData;
+    try {
+      const result = await this.messageService.listSince({
+        roomId: payload.roomId,
+        userId,
+        sinceSeq: payload.sinceSeq,
+        limit: payload.limit,
+      });
+      return {
+        ok: true,
+        data: {
+          messages: result.messages.map((m) => this.toDto(m)),
+          hasMore: result.hasMore,
+        },
+      };
+    } catch (e) {
+      if (e instanceof NotInRoomError) {
+        return { ok: false, error: { code: 'NOT_FOUND', message: 'not found' } };
+      }
+      this.logger.error(e);
+      return { ok: false, error: { code: 'INTERNAL', message: 'internal' } };
+    }
+  }
+
+  private toDto(msg: {
+    id: string;
+    roomId: string;
+    senderId: string;
+    content: string;
+    seq: number;
+    createdAt: Date;
+  }): MessageDto {
+    return {
+      messageId: msg.id,
+      roomId: msg.roomId,
+      senderId: msg.senderId,
+      content: msg.content,
+      seq: msg.seq,
+      createdAt: msg.createdAt.toISOString(),
+    };
   }
 
   private extractTokenFromHandshake(socket: Socket): string | undefined {

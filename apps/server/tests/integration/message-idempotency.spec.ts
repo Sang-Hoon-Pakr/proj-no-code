@@ -48,6 +48,7 @@ describe('MessageService — idempotency invariant', () => {
         type        TEXT NOT NULL CHECK (type IN ('direct', 'group')),
         name        TEXT,
         created_by  UUID NOT NULL REFERENCES users(id),
+        last_seq    BIGINT NOT NULL DEFAULT 0,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE TABLE room_members (
@@ -70,7 +71,9 @@ describe('MessageService — idempotency invariant', () => {
         room_id     UUID NOT NULL REFERENCES rooms(id),
         sender_id   UUID NOT NULL REFERENCES users(id),
         content     TEXT NOT NULL,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        seq         BIGINT NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (room_id, seq)
       );
     `);
     roomService = new RoomService(pool);
@@ -181,5 +184,167 @@ describe('MessageService — idempotency invariant', () => {
         content: 'into the void',
       }),
     ).rejects.toBeInstanceOf(NotInRoomError);
+  });
+
+  describe('seq monotonicity', () => {
+    it('first message gets seq=1', async () => {
+      const msg = await messageService.create({
+        messageId: uuidv7(),
+        roomId,
+        senderId,
+        content: 'first',
+      });
+      expect(msg.seq).toBe(1);
+    });
+
+    it('seq increases monotonically within a room (1, 2, 3, ...)', async () => {
+      const seqs: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const msg = await messageService.create({
+          messageId: uuidv7(),
+          roomId,
+          senderId,
+          content: `m${i}`,
+        });
+        seqs.push(msg.seq);
+      }
+      expect(seqs).toEqual([1, 2, 3, 4, 5]);
+    });
+
+    it('seq is per-room (independent counters)', async () => {
+      // 또 다른 방 만들기
+      const thirdUserId = await seedUser(pool);
+      const otherRoom = await roomService.createDirect({
+        userIdA: senderId,
+        userIdB: thirdUserId,
+      });
+
+      const a = await messageService.create({
+        messageId: uuidv7(),
+        roomId,
+        senderId,
+        content: 'in room1',
+      });
+      const b = await messageService.create({
+        messageId: uuidv7(),
+        roomId: otherRoom.id,
+        senderId,
+        content: 'in room2',
+      });
+
+      expect(a.seq).toBe(1);
+      expect(b.seq).toBe(1); // independent
+    });
+
+    it('idempotent re-send returns same seq (no increment)', async () => {
+      const messageId = uuidv7();
+      const a = await messageService.create({ messageId, roomId, senderId, content: 'a' });
+      const b = await messageService.create({
+        messageId,
+        roomId,
+        senderId,
+        content: 'override-attempt',
+      });
+
+      expect(b.seq).toBe(a.seq);
+
+      // 다음 메시지의 seq가 a.seq+1이어야 함 (idempotent 재호출이 카운터 증가 X)
+      const c = await messageService.create({
+        messageId: uuidv7(),
+        roomId,
+        senderId,
+        content: 'next',
+      });
+      expect(c.seq).toBe(a.seq + 1);
+    });
+  });
+
+  describe('listSince', () => {
+    it('returns messages with seq > sinceSeq, ascending', async () => {
+      for (let i = 0; i < 3; i++) {
+        await messageService.create({
+          messageId: uuidv7(),
+          roomId,
+          senderId,
+          content: `m${i}`,
+        });
+      }
+
+      const { messages, hasMore } = await messageService.listSince({
+        roomId,
+        userId: senderId,
+        sinceSeq: 0,
+      });
+
+      expect(messages.map((m) => m.seq)).toEqual([1, 2, 3]);
+      expect(messages.map((m) => m.content)).toEqual(['m0', 'm1', 'm2']);
+      expect(hasMore).toBe(false);
+    });
+
+    it('respects sinceSeq cursor (only newer messages)', async () => {
+      const ids: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        const msg = await messageService.create({
+          messageId: uuidv7(),
+          roomId,
+          senderId,
+          content: `m${i}`,
+        });
+        ids.push(msg.seq);
+      }
+
+      const { messages } = await messageService.listSince({
+        roomId,
+        userId: senderId,
+        sinceSeq: 2,
+      });
+
+      expect(messages.map((m) => m.seq)).toEqual([3, 4]);
+    });
+
+    it('respects limit and reports hasMore', async () => {
+      for (let i = 0; i < 5; i++) {
+        await messageService.create({
+          messageId: uuidv7(),
+          roomId,
+          senderId,
+          content: `m${i}`,
+        });
+      }
+
+      const { messages, hasMore } = await messageService.listSince({
+        roomId,
+        userId: senderId,
+        sinceSeq: 0,
+        limit: 3,
+      });
+
+      expect(messages.length).toBe(3);
+      expect(hasMore).toBe(true);
+    });
+
+    it('rejects non-member → NotInRoomError', async () => {
+      const outsider = await seedUser(pool);
+      await expect(
+        messageService.listSince({ roomId, userId: outsider, sinceSeq: 0 }),
+      ).rejects.toBeInstanceOf(NotInRoomError);
+    });
+
+    it('empty result when sinceSeq is at or beyond max', async () => {
+      const msg = await messageService.create({
+        messageId: uuidv7(),
+        roomId,
+        senderId,
+        content: 'only',
+      });
+
+      const { messages } = await messageService.listSince({
+        roomId,
+        userId: senderId,
+        sinceSeq: msg.seq,
+      });
+
+      expect(messages).toEqual([]);
+    });
   });
 });
