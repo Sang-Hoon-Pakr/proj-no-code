@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import type { RoomService } from '../room/room.service';
 
 export interface CreateMessageInput {
   messageId: string;
@@ -15,6 +16,14 @@ export interface Message {
   createdAt: Date;
 }
 
+export class NotInRoomError extends Error {
+  constructor() {
+    // security-rules.md: 404와 403 누설 방지 — non-member도 non-existent도 같은 에러로 통일.
+    super('not a member of room');
+    this.name = 'NotInRoomError';
+  }
+}
+
 interface MessageRow {
   id: string;
   room_id: string;
@@ -24,9 +33,18 @@ interface MessageRow {
 }
 
 export class MessageService {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly roomService: RoomService,
+  ) {}
 
   async create(input: CreateMessageInput): Promise<Message> {
+    // 게이트: sender가 방 멤버여야 INSERT 시도 자체가 가능.
+    // 방이 없어도 isMember false 반환되므로 NotInRoomError로 통일.
+    if (!(await this.roomService.isMember(input.roomId, input.senderId))) {
+      throw new NotInRoomError();
+    }
+
     const result = await this.pool.query<MessageRow>(
       `
         WITH inserted AS (
