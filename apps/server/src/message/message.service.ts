@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { RoomService } from '../room/room.service';
+import type { BlockService } from '../block/block.service';
 
 export interface CreateMessageInput {
   messageId: string;
@@ -60,11 +61,19 @@ export class MessageService {
   constructor(
     private readonly pool: Pool,
     private readonly roomService: RoomService,
+    private readonly blockService: BlockService,
   ) {}
 
   async create(input: CreateMessageInput): Promise<Message> {
     // 게이트: sender가 방 멤버여야 INSERT 시도 자체가 가능.
     if (!(await this.roomService.isMember(input.roomId, input.senderId))) {
+      throw new NotInRoomError();
+    }
+
+    // security-rules.md: 차단은 양방향 즉시 적용 — 1:1방 한정 검사 (그룹방은 공개 broadcast).
+    // 누설 방지를 위해 NotInRoomError로 통일 (BlockedError 분리하면 차단 사실 노출).
+    const otherUserId = await this.roomService.getDirectRoomOther(input.roomId, input.senderId);
+    if (otherUserId && (await this.blockService.isBlockedBetween(input.senderId, otherUserId))) {
       throw new NotInRoomError();
     }
 
