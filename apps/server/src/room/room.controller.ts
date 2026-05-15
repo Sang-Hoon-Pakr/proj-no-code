@@ -1,5 +1,15 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
-import { RoomService, type Room } from './room.service';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { RoomService, type ListRoomsOutput, type Room } from './room.service';
 import { JwtAuthGuard, type AuthContext } from '../common/jwt.guard';
 import { CurrentUser } from '../common/current-user.decorator';
 
@@ -64,5 +74,19 @@ export class RoomController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async leave(@CurrentUser() user: AuthContext, @Param('id') roomId: string): Promise<void> {
     await this.roomService.leave({ roomId, userId: user.userId });
+  }
+
+  @Get('me')
+  async listMyRooms(
+    @CurrentUser() user: AuthContext,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ): Promise<ListRoomsOutput> {
+    const parsedLimit = limit !== undefined ? Number(limit) : undefined;
+    return this.roomService.listForUser({
+      userId: user.userId,
+      cursor,
+      limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+    });
   }
 }

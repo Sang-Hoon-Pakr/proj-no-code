@@ -1,9 +1,14 @@
+import { Buffer } from 'node:buffer';
 import type { Pool } from 'pg';
 import { uuidv7 } from 'uuidv7';
 
 // realtime-rules.md: 방 인원 ≤ 500. 초과 시 "오픈채팅" 모델로 분기 (별도 설계).
 const MAX_GROUP_SIZE = 500;
 const PG_UNIQUE_VIOLATION = '23505';
+
+// api-conventions.md: 페이지 기본 30, max 100
+const DEFAULT_LIST_LIMIT = 30;
+const MAX_LIST_LIMIT = 100;
 
 export type RoomType = 'direct' | 'group';
 
@@ -34,6 +39,39 @@ export interface AddMemberInput {
 export interface LeaveInput {
   roomId: string;
   userId: string;
+}
+
+export interface RoomListItem {
+  id: string;
+  type: RoomType;
+  name: string | null;
+  lastActivityAt: string;
+  lastMessage: {
+    id: string;
+    senderId: string;
+    content: string;
+    seq: number;
+    createdAt: string;
+  } | null;
+  unreadCount: number;
+  otherUser: {
+    id: string;
+    nickname: string;
+    profileImageUrl: string | null;
+    statusMessage: string | null;
+  } | null;
+}
+
+export interface ListRoomsInput {
+  userId: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ListRoomsOutput {
+  rooms: RoomListItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 export class SelfRoomError extends Error {
@@ -203,6 +241,83 @@ export class RoomService {
     return rows.map((r) => r.room_id);
   }
 
+  async listForUser(input: ListRoomsInput): Promise<ListRoomsOutput> {
+    const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIST_LIMIT, 1), MAX_LIST_LIMIT);
+    const cursor = input.cursor ? decodeCursor(input.cursor) : null;
+
+    const params: unknown[] = [input.userId];
+    let cursorCondition = '';
+    if (cursor) {
+      params.push(cursor.lastActivityAt, cursor.roomId);
+      cursorCondition = `WHERE (activity_at, room_id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`;
+    }
+    params.push(limit + 1); // +1 to detect hasMore
+
+    const sql = `
+      WITH last_msg AS (
+        SELECT DISTINCT ON (m.room_id)
+          m.room_id, m.id, m.sender_id, m.content, m.seq, m.created_at
+        FROM messages m
+        JOIN room_members rm ON rm.room_id = m.room_id
+        WHERE rm.user_id = $1
+        ORDER BY m.room_id, m.seq DESC
+      ),
+      all_rooms AS (
+        SELECT
+          r.id AS room_id,
+          r.type,
+          r.name,
+          rm.last_read_seq,
+          lm.id AS last_msg_id,
+          lm.sender_id AS last_msg_sender_id,
+          lm.content AS last_msg_content,
+          lm.seq AS last_msg_seq,
+          lm.created_at AS last_msg_at,
+          COALESCE(lm.created_at, r.created_at) AS activity_at
+        FROM rooms r
+        JOIN room_members rm ON rm.room_id = r.id
+        LEFT JOIN last_msg lm ON lm.room_id = r.id
+        WHERE rm.user_id = $1
+      )
+      SELECT
+        ar.*,
+        (
+          SELECT COUNT(*)::bigint FROM messages
+          WHERE room_id = ar.room_id AND seq > ar.last_read_seq
+        ) AS unread,
+        CASE WHEN ar.type = 'direct' THEN (
+          SELECT json_build_object(
+            'id', u.id,
+            'nickname', u.nickname,
+            'profileImageUrl', u.profile_image_url,
+            'statusMessage', u.status_message
+          )
+          FROM room_members rm2
+          JOIN users u ON u.id = rm2.user_id
+          WHERE rm2.room_id = ar.room_id AND rm2.user_id != $1
+          LIMIT 1
+        ) ELSE NULL END AS other_user
+      FROM all_rooms ar
+      ${cursorCondition}
+      ORDER BY activity_at DESC, room_id DESC
+      LIMIT $${params.length}
+    `;
+
+    const { rows } = await this.pool.query<RoomListRow>(sql, params);
+
+    const hasMore = rows.length > limit;
+    const slice = hasMore ? rows.slice(0, limit) : rows;
+    const items = slice.map(rowToRoomListItem);
+
+    let nextCursor: string | null = null;
+    if (hasMore && slice.length > 0) {
+      const last = slice[slice.length - 1];
+      nextCursor = encodeCursor(last.activity_at, last.room_id);
+    }
+
+    return { rooms: items, nextCursor, hasMore };
+  }
+
   // 1:1방의 상대방 userId 반환. 그룹방이거나 미존재면 null.
   async getDirectRoomOther(roomId: string, userId: string): Promise<string | null> {
     const { rows } = await this.pool.query<{ user_id: string }>(
@@ -249,4 +364,59 @@ function isPgUniqueViolation(e: unknown): boolean {
     'code' in e &&
     (e as { code?: unknown }).code === PG_UNIQUE_VIOLATION
   );
+}
+
+interface RoomListRow {
+  room_id: string;
+  type: RoomType;
+  name: string | null;
+  last_read_seq: string;
+  last_msg_id: string | null;
+  last_msg_sender_id: string | null;
+  last_msg_content: string | null;
+  last_msg_seq: string | null;
+  last_msg_at: Date | null;
+  activity_at: Date;
+  unread: string;
+  other_user: {
+    id: string;
+    nickname: string;
+    profileImageUrl: string | null;
+    statusMessage: string | null;
+  } | null;
+}
+
+function rowToRoomListItem(row: RoomListRow): RoomListItem {
+  return {
+    id: row.room_id,
+    type: row.type,
+    name: row.name,
+    lastActivityAt: row.activity_at.toISOString(),
+    lastMessage: row.last_msg_id
+      ? {
+          id: row.last_msg_id,
+          senderId: row.last_msg_sender_id as string,
+          content: row.last_msg_content as string,
+          seq: Number(row.last_msg_seq),
+          createdAt: (row.last_msg_at as Date).toISOString(),
+        }
+      : null,
+    unreadCount: Number(row.unread),
+    otherUser: row.other_user,
+  };
+}
+
+function encodeCursor(activityAt: Date, roomId: string): string {
+  return Buffer.from(`${activityAt.toISOString()}|${roomId}`, 'utf8').toString('base64');
+}
+
+function decodeCursor(cursor: string): { lastActivityAt: string; roomId: string } | null {
+  try {
+    const raw = Buffer.from(cursor, 'base64').toString('utf8');
+    const [ts, roomId] = raw.split('|');
+    if (!ts || !roomId) return null;
+    return { lastActivityAt: ts, roomId };
+  } catch {
+    return null;
+  }
 }
