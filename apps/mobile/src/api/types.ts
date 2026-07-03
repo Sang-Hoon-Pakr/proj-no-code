@@ -39,6 +39,21 @@ export interface RoomListResponse {
   hasMore: boolean;
 }
 
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  senderId: string;
+  content: string;
+  seq: number;
+  createdAt: string;
+}
+
+export interface MessageListResponse {
+  messages: ChatMessage[];
+  hasMore: boolean;
+  nextBefore: number | null;
+}
+
 export interface ProblemDetail {
   type: string;
   title: string;

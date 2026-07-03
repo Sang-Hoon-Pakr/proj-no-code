@@ -42,6 +42,10 @@
 - 테스트 간 순서 의존. 단독 실행도 가능해야 함.
 - `.only`, `.skip` 커밋. CI에서 검사.
 
+## Jest (모바일) 사용 주의
+
+- pnpm 모노레포에서 jest preset(jest-expo 등)의 `transformIgnorePatterns`는 `.pnpm` 경로를 못 잡는다 — `node_modules/(?!(?:\.pnpm/)?(<allowlist>))` 형태로 오버라이드 필수.
+
 ## Vitest 사용 주의
 
 - 디렉토리 필터는 **positional argument** (`vitest run src`). `--dir`는 cwd 변경이지 필터 아님.

@@ -4,8 +4,16 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../store/auth';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RoomListScreen } from '../screens/RoomListScreen';
+import { ChatRoomScreen } from '../screens/ChatRoom/ChatRoomScreen';
 
-const Stack = createNativeStackNavigator();
+// mobile CLAUDE.md: 네비게이션 파라미터는 typed.
+export type RootStackParamList = {
+  Login: undefined;
+  RoomList: undefined;
+  ChatRoom: { roomId: string; title: string };
+};
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export function RootNavigator(): JSX.Element {
   const status = useAuth((s) => s.status);
@@ -26,7 +34,10 @@ export function RootNavigator(): JSX.Element {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       {status === 'authenticated' ? (
-        <Stack.Screen name="RoomList" component={RoomListScreen} />
+        <>
+          <Stack.Screen name="RoomList" component={RoomListScreen} />
+          <Stack.Screen name="ChatRoom" component={ChatRoomScreen} />
+        </>
       ) : (
         <Stack.Screen name="Login" component={LoginScreen} />
       )}

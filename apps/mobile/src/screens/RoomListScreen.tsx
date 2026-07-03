@@ -9,11 +9,21 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../store/auth';
 import { listMyRooms } from '../api/rooms.api';
 import type { RoomListItem } from '../api/types';
+import type { RootStackParamList } from '../navigation/RootNavigator';
 
-export function RoomListScreen(): JSX.Element {
+type Props = NativeStackScreenProps<RootStackParamList, 'RoomList'>;
+
+function roomTitle(room: RoomListItem): string {
+  return room.type === 'direct'
+    ? (room.otherUser?.nickname ?? '대화상대')
+    : (room.name ?? '그룹채팅');
+}
+
+export function RoomListScreen({ navigation }: Props): JSX.Element {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
 
@@ -39,6 +49,13 @@ export function RoomListScreen(): JSX.Element {
       setLoading(false);
     })();
   }, [fetchRooms]);
+
+  const handlePressRoom = useCallback(
+    (room: RoomListItem): void => {
+      navigation.navigate('ChatRoom', { roomId: room.id, title: roomTitle(room) });
+    },
+    [navigation],
+  );
 
   async function onRefresh(): Promise<void> {
     setRefreshing(true);
@@ -82,7 +99,7 @@ export function RoomListScreen(): JSX.Element {
           data={rooms}
           keyExtractor={(item) => item.id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          renderItem={({ item }) => <RoomRow room={item} />}
+          renderItem={({ item }) => <RoomRow room={item} onPress={handlePressRoom} />}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
       )}
@@ -90,11 +107,17 @@ export function RoomListScreen(): JSX.Element {
   );
 }
 
-function RoomRow({ room }: { room: RoomListItem }): JSX.Element {
-  const title = room.type === 'direct' ? (room.otherUser?.nickname ?? '대화상대') : room.name;
+function RoomRow({
+  room,
+  onPress,
+}: {
+  room: RoomListItem;
+  onPress: (room: RoomListItem) => void;
+}): JSX.Element {
+  const title = roomTitle(room);
   const preview = room.lastMessage?.content ?? '메시지 없음';
   return (
-    <TouchableOpacity style={styles.row}>
+    <TouchableOpacity style={styles.row} onPress={() => onPress(room)}>
       <View style={styles.rowMain}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {title}
