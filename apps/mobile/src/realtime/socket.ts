@@ -8,8 +8,26 @@ import type { WsMessageDto } from '../api/types';
 const RECONNECT_DELAY_MS = 1000;
 const RECONNECT_DELAY_MAX_MS = 30_000;
 const JITTER_FACTOR = 0.2;
+// realtime-rules.md: 5초 안에 ack 없으면 failed 처리.
+const SEND_ACK_TIMEOUT_MS = 5000;
 
 type NewMessageHandler = (dto: WsMessageDto) => void;
+
+interface AckError {
+  ok: false;
+  error: { code: string; message: string };
+}
+interface SendAckOk {
+  ok: true;
+  data: { messageId: string; seq: number; createdAt: string };
+}
+type SendAck = SendAckOk | AckError;
+
+export interface SendResult {
+  messageId: string;
+  seq: number;
+  createdAt: string;
+}
 
 let socket: Socket | null = null;
 const newMessageHandlers = new Set<NewMessageHandler>();
@@ -75,6 +93,33 @@ async function handleConnectError(err: Error): Promise<void> {
 
 export function disconnectSocket(): void {
   socket?.disconnect();
+}
+
+// 재시도는 같은 messageId로 다시 호출 — 서버가 dedupe하고 항상 success ack (멱등성).
+export function sendMessage(payload: {
+  messageId: string;
+  roomId: string;
+  content: string;
+}): Promise<SendResult> {
+  return new Promise((resolve, reject) => {
+    if (!socket?.connected) {
+      reject(new Error('DISCONNECTED'));
+      return;
+    }
+    socket
+      .timeout(SEND_ACK_TIMEOUT_MS)
+      .emit('message:send', payload, (err: Error | null, ack: SendAck) => {
+        if (err) {
+          reject(new Error('ACK_TIMEOUT'));
+          return;
+        }
+        if (ack.ok) {
+          resolve(ack.data);
+        } else {
+          reject(new Error(ack.error.code));
+        }
+      });
+  });
 }
 
 // 반환된 함수로 구독 해제. 핸들러는 모든 방의 message:new를 받으므로
