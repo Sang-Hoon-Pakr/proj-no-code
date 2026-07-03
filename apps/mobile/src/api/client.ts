@@ -1,9 +1,9 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { config } from '../config';
 import type { ProblemDetail, TokenPair } from './types';
 
-// security-rules.md (앱): refresh token은 Keychain/Keystore에 저장.
-// MVP 단계에서는 AsyncStorage 사용 (TODO: SecureStore로 마이그레이션).
+// security-rules.md / mobile-rules.md: 토큰은 Keychain(iOS)/Keystore(Android).
+// AsyncStorage 저장 금지 — expo-secure-store 사용.
 const ACCESS_TOKEN_KEY = 'auth.accessToken';
 const REFRESH_TOKEN_KEY = 'auth.refreshToken';
 
@@ -24,22 +24,25 @@ export function setUnauthorizedHandler(h: () => void): void {
 }
 
 export async function setTokens(tokens: TokenPair): Promise<void> {
-  await AsyncStorage.multiSet([
-    [ACCESS_TOKEN_KEY, tokens.accessToken],
-    [REFRESH_TOKEN_KEY, tokens.refreshToken],
+  await Promise.all([
+    SecureStore.setItemAsync(ACCESS_TOKEN_KEY, tokens.accessToken),
+    SecureStore.setItemAsync(REFRESH_TOKEN_KEY, tokens.refreshToken),
   ]);
 }
 
 export async function getAccessToken(): Promise<string | null> {
-  return AsyncStorage.getItem(ACCESS_TOKEN_KEY);
+  return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
 }
 
 export async function getRefreshToken(): Promise<string | null> {
-  return AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
 }
 
 export async function clearTokens(): Promise<void> {
-  await AsyncStorage.multiRemove([ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY]);
+  await Promise.all([
+    SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+  ]);
 }
 
 interface RequestOptions {
