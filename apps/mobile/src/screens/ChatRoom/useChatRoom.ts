@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listRoomMessages } from '../../api/messages.api';
 import {
   fetchMessagesSince,
+  markRead,
   sendMessage,
   subscribeConnected,
   subscribeNewMessages,
 } from '../../realtime/socket';
 import { maxSeq, mergeMessagesDesc, toChatMessage } from '../../lib/messages';
+import { ReadMarker } from '../../lib/read-marker';
 import { uuidv7 } from '../../lib/uuid';
 import { useAuth } from '../../store/auth';
 import type { ChatMessage } from '../../api/types';
@@ -53,9 +55,23 @@ export function useChatRoom(roomId: string): ChatRoomState {
   // 마지막 본 seq — 재연결 catch-up의 since cursor.
   const lastSeqRef = useRef(0);
   const sinceInFlightRef = useRef(false);
+  const readMarkerRef = useRef<ReadMarker | null>(null);
+
+  // 방 단위 ReadMarker — 이탈 시 flush로 디바운스 잔여분 즉시 전송.
+  useEffect(() => {
+    const marker = new ReadMarker((seq) => markRead({ roomId, seq }));
+    readMarkerRef.current = marker;
+    return () => {
+      marker.flush();
+      readMarkerRef.current = null;
+    };
+  }, [roomId]);
 
   useEffect(() => {
-    lastSeqRef.current = maxSeq(messages);
+    const seq = maxSeq(messages);
+    lastSeqRef.current = seq;
+    // inverted 리스트라 최신 메시지는 항상 화면에 보임 — 목록의 최대 seq를 읽음 처리.
+    if (seq > 0) readMarkerRef.current?.notify(seq);
   }, [messages]);
 
   const reload = useCallback((): void => {
