@@ -82,28 +82,39 @@ async function doFetch<T>(path: string, options: RequestOptions): Promise<T> {
   return data as T;
 }
 
-// 401 시 refresh 1회 시도 후 재요청. refresh도 401이면 onUnauthorized 콜백 → 로그인 화면 이동.
+// refresh rotation 1회 시도. REST 401 경로와 WS connect_error 경로가 공유.
+// 서버 거부(ApiError)면 세션 종료, 네트워크 에러면 토큰 유지 (재시도 여지).
+export async function refreshTokens(): Promise<boolean> {
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) {
+    onUnauthorized?.();
+    return false;
+  }
+  try {
+    const tokens = await doFetch<{ data: TokenPair }>('/auth/refresh', {
+      method: 'POST',
+      body: { refreshToken },
+      auth: false,
+    });
+    await setTokens(tokens.data);
+    return true;
+  } catch (e) {
+    if (e instanceof ApiError) {
+      await clearTokens();
+      onUnauthorized?.();
+    }
+    return false;
+  }
+}
+
+// 401 시 refresh 1회 시도 후 재요청. refresh도 거부되면 onUnauthorized 콜백 → 로그인 화면 이동.
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
   try {
     return await doFetch<T>(path, options);
   } catch (e) {
     if (e instanceof ApiError && e.status === 401 && options.auth !== false) {
-      const refreshToken = await getRefreshToken();
-      if (refreshToken) {
-        try {
-          const tokens = await doFetch<{ data: TokenPair }>('/auth/refresh', {
-            method: 'POST',
-            body: { refreshToken },
-            auth: false,
-          });
-          await setTokens(tokens.data);
-          return await doFetch<T>(path, options);
-        } catch {
-          await clearTokens();
-          onUnauthorized?.();
-        }
-      } else {
-        onUnauthorized?.();
+      if (await refreshTokens()) {
+        return await doFetch<T>(path, options);
       }
     }
     throw e;

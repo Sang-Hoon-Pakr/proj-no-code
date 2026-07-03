@@ -1,4 +1,16 @@
-import type { ChatMessage } from '../api/types';
+import type { ChatMessage, WsMessageDto } from '../api/types';
+
+// WS payload는 id가 `messageId` 필드 — REST ChatMessage 모양으로 정규화.
+export function toChatMessage(dto: WsMessageDto): ChatMessage {
+  return {
+    id: dto.messageId,
+    roomId: dto.roomId,
+    senderId: dto.senderId,
+    content: dto.content,
+    seq: dto.seq,
+    createdAt: dto.createdAt,
+  };
+}
 
 // realtime-rules.md: at-least-once 전제 — 히스토리 페이지네이션이든 실시간 수신이든
 // 어느 경로로 와도 messageId(id)로 dedupe. 기존 항목이 이긴다 (재수신 무시).

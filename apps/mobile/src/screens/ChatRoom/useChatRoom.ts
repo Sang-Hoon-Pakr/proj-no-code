@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listRoomMessages } from '../../api/messages.api';
-import { mergeMessagesDesc } from '../../lib/messages';
+import { subscribeNewMessages } from '../../realtime/socket';
+import { mergeMessagesDesc, toChatMessage } from '../../lib/messages';
 import type { ChatMessage } from '../../api/types';
 
 export interface ChatRoomState {
@@ -68,6 +69,14 @@ export function useChatRoom(roomId: string): ChatRoomState {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  // 실시간 수신 — at-least-once 전제, mergeMessagesDesc가 id로 dedupe.
+  useEffect(() => {
+    return subscribeNewMessages((dto) => {
+      if (dto.roomId !== roomId) return;
+      setMessages((prev) => mergeMessagesDesc(prev, [toChatMessage(dto)]));
+    });
+  }, [roomId]);
 
   return { messages, loading, loadingMore, error, hasMore, reload, loadOlder };
 }
