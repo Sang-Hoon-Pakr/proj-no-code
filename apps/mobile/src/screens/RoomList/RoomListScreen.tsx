@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -10,10 +10,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useAuth } from '../store/auth';
-import { listMyRooms } from '../api/rooms.api';
-import type { RoomListItem } from '../api/types';
-import type { RootStackParamList } from '../navigation/RootNavigator';
+import { useAuth } from '../../store/auth';
+import { useRoomList } from './useRoomList';
+import type { RoomListItem } from '../../api/types';
+import type { RootStackParamList } from '../../navigation/RootNavigator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RoomList'>;
 
@@ -26,29 +26,7 @@ function roomTitle(room: RoomListItem): string {
 export function RoomListScreen({ navigation }: Props): JSX.Element {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
-
-  const [rooms, setRooms] = useState<RoomListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchRooms = useCallback(async (): Promise<void> => {
-    try {
-      const res = await listMyRooms();
-      setRooms(res.rooms);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'unknown');
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      await fetchRooms();
-      setLoading(false);
-    })();
-  }, [fetchRooms]);
+  const { rooms, loading, refreshing, error, refresh, retry } = useRoomList();
 
   const handlePressRoom = useCallback(
     (room: RoomListItem): void => {
@@ -56,12 +34,6 @@ export function RoomListScreen({ navigation }: Props): JSX.Element {
     },
     [navigation],
   );
-
-  async function onRefresh(): Promise<void> {
-    setRefreshing(true);
-    await fetchRooms();
-    setRefreshing(false);
-  }
 
   if (loading) {
     return (
@@ -86,7 +58,7 @@ export function RoomListScreen({ navigation }: Props): JSX.Element {
       {error ? (
         <View style={styles.center}>
           <Text style={styles.error}>오류: {error}</Text>
-          <TouchableOpacity onPress={() => void fetchRooms()} style={styles.retry}>
+          <TouchableOpacity onPress={retry} style={styles.retry}>
             <Text>다시 시도</Text>
           </TouchableOpacity>
         </View>
@@ -98,7 +70,9 @@ export function RoomListScreen({ navigation }: Props): JSX.Element {
         <FlatList
           data={rooms}
           keyExtractor={(item) => item.id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />
+          }
           renderItem={({ item }) => <RoomRow room={item} onPress={handlePressRoom} />}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
         />

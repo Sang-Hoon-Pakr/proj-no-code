@@ -4,7 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../store/auth';
 import { useSocketLifecycle } from '../realtime/useSocketLifecycle';
 import { LoginScreen } from '../screens/LoginScreen';
-import { RoomListScreen } from '../screens/RoomListScreen';
+import { RoomListScreen } from '../screens/RoomList/RoomListScreen';
 import { ChatRoomScreen } from '../screens/ChatRoom/ChatRoomScreen';
 
 // mobile CLAUDE.md: 네비게이션 파라미터는 typed.
