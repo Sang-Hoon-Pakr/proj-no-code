@@ -1,5 +1,5 @@
-import { mergeMessagesDesc } from './messages';
-import type { ChatMessage } from '../api/types';
+import { mergeMessagesDesc, toChatMessage } from './messages';
+import type { ChatMessage, WsMessageDto } from '../api/types';
 
 function msg(id: string, seq: number, content = 'x'): ChatMessage {
   return {
@@ -33,5 +33,28 @@ describe('mergeMessagesDesc', () => {
 
   it('빈 입력끼리 병합하면 빈 배열을 반환한다', () => {
     expect(mergeMessagesDesc([], [])).toEqual([]);
+  });
+});
+
+describe('toChatMessage', () => {
+  const dto: WsMessageDto = {
+    messageId: 'msg-1',
+    roomId: 'room-1',
+    senderId: 'user-1',
+    content: 'hello',
+    seq: 7,
+    createdAt: '2026-07-03T00:00:00.000Z',
+  };
+
+  it('WS dto의 messageId를 id로 매핑한다', () => {
+    const m = toChatMessage(dto);
+    expect(m.id).toBe('msg-1');
+    expect(m.seq).toBe(7);
+  });
+
+  it('히스토리와 WS로 같은 메시지를 받아도 병합 후 1건이다 (at-least-once)', () => {
+    const fromHistory = toChatMessage(dto);
+    const merged = mergeMessagesDesc([fromHistory], [toChatMessage(dto)]);
+    expect(merged).toHaveLength(1);
   });
 });

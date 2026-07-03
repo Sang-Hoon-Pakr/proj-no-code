@@ -54,6 +54,16 @@ export interface MessageListResponse {
   nextBefore: number | null;
 }
 
+// WS `message:new` / `messages:since` payload — REST와 달리 id가 `messageId` 필드로 온다.
+export interface WsMessageDto {
+  messageId: string;
+  roomId: string;
+  senderId: string;
+  content: string;
+  seq: number;
+  createdAt: string;
+}
+
 export interface ProblemDetail {
   type: string;
   title: string;

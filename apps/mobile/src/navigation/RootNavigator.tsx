@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../store/auth';
+import { useSocketLifecycle } from '../realtime/useSocketLifecycle';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RoomListScreen } from '../screens/RoomListScreen';
 import { ChatRoomScreen } from '../screens/ChatRoom/ChatRoomScreen';
@@ -18,6 +19,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export function RootNavigator(): JSX.Element {
   const status = useAuth((s) => s.status);
   const hydrate = useAuth((s) => s.hydrate);
+  useSocketLifecycle();
 
   useEffect(() => {
     void hydrate();

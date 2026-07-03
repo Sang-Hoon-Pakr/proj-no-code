@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '../../store/auth';
+import { useConnection } from '../../store/connection';
 import { useChatRoom } from './useChatRoom';
 import type { RootStackParamList } from '../../navigation/RootNavigator';
 import type { ChatMessage } from '../../api/types';
@@ -19,6 +20,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ChatRoom'>;
 export function ChatRoomScreen({ navigation, route }: Props): JSX.Element {
   const { roomId, title } = route.params;
   const myUserId = useAuth((s) => s.user?.id);
+  const showDisconnectedBanner = useConnection((s) => s.showBanner);
   const { messages, loading, loadingMore, error, reload, loadOlder } = useChatRoom(roomId);
 
   const renderItem = useCallback(
@@ -39,6 +41,12 @@ export function ChatRoomScreen({ navigation, route }: Props): JSX.Element {
         </Text>
         <View style={styles.backBtn} />
       </View>
+
+      {showDisconnectedBanner ? (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>연결 끊김 — 재연결 시도 중</Text>
+        </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>
@@ -133,6 +141,8 @@ const styles = StyleSheet.create({
   bubbleOther: { backgroundColor: '#f0f0f0' },
   bubbleText: { fontSize: 15, color: '#111' },
   time: { fontSize: 10, color: '#999', marginBottom: 2 },
+  banner: { backgroundColor: '#b00020', paddingVertical: 6, alignItems: 'center' },
+  bannerText: { color: '#fff', fontSize: 12 },
   moreSpinner: { marginVertical: 12 },
   muted: { color: '#999' },
   error: { color: 'red', marginBottom: 12 },
