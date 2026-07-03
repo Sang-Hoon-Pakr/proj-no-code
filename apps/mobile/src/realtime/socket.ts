@@ -12,6 +12,7 @@ const JITTER_FACTOR = 0.2;
 const SEND_ACK_TIMEOUT_MS = 5000;
 
 type NewMessageHandler = (dto: WsMessageDto) => void;
+type ConnectedHandler = () => void;
 
 interface AckError {
   ok: false;
@@ -23,14 +24,26 @@ interface SendAckOk {
 }
 type SendAck = SendAckOk | AckError;
 
+interface SinceAckOk {
+  ok: true;
+  data: { messages: WsMessageDto[]; hasMore: boolean };
+}
+type SinceAck = SinceAckOk | AckError;
+
 export interface SendResult {
   messageId: string;
   seq: number;
   createdAt: string;
 }
 
+export interface SinceResult {
+  messages: WsMessageDto[]; // seq 오름차순 (서버 listSince)
+  hasMore: boolean;
+}
+
 let socket: Socket | null = null;
 const newMessageHandlers = new Set<NewMessageHandler>();
+const connectedHandlers = new Set<ConnectedHandler>();
 
 export function connectSocket(): void {
   if (socket) {
@@ -56,6 +69,10 @@ export function connectSocket(): void {
 
   socket.on('connect', () => {
     useConnection.getState().setConnected();
+    // 재연결 포함 — 구독자(열린 채팅방 등)가 messages:since로 누락분 동기화.
+    for (const handler of connectedHandlers) {
+      handler();
+    }
   });
 
   socket.io.on('reconnect_attempt', () => {
@@ -129,4 +146,38 @@ export function subscribeNewMessages(handler: NewMessageHandler): () => void {
   return () => {
     newMessageHandlers.delete(handler);
   };
+}
+
+export function subscribeConnected(handler: ConnectedHandler): () => void {
+  connectedHandlers.add(handler);
+  return () => {
+    connectedHandlers.delete(handler);
+  };
+}
+
+// realtime-rules.md: 재연결 시 마지막 본 seq 이후 누락분 동기화.
+export function fetchMessagesSince(payload: {
+  roomId: string;
+  sinceSeq: number;
+  limit?: number;
+}): Promise<SinceResult> {
+  return new Promise((resolve, reject) => {
+    if (!socket?.connected) {
+      reject(new Error('DISCONNECTED'));
+      return;
+    }
+    socket
+      .timeout(SEND_ACK_TIMEOUT_MS)
+      .emit('messages:since', payload, (err: Error | null, ack: SinceAck) => {
+        if (err) {
+          reject(new Error('ACK_TIMEOUT'));
+          return;
+        }
+        if (ack.ok) {
+          resolve(ack.data);
+        } else {
+          reject(new Error(ack.error.code));
+        }
+      });
+  });
 }
