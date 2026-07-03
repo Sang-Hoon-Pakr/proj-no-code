@@ -30,6 +30,11 @@ interface SinceAckOk {
 }
 type SinceAck = SinceAckOk | AckError;
 
+interface OkAck {
+  ok: true;
+}
+type ReadAck = OkAck | AckError;
+
 export interface SendResult {
   messageId: string;
   seq: number;
@@ -153,6 +158,29 @@ export function subscribeConnected(handler: ConnectedHandler): () => void {
   return () => {
     connectedHandlers.delete(handler);
   };
+}
+
+// 읽음 처리 — 서버는 lastReadSeq 단조증가만 허용 (작은 seq 전송해도 무영향).
+export function markRead(payload: { roomId: string; seq: number }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!socket?.connected) {
+      reject(new Error('DISCONNECTED'));
+      return;
+    }
+    socket
+      .timeout(SEND_ACK_TIMEOUT_MS)
+      .emit('read:mark', payload, (err: Error | null, ack: ReadAck) => {
+        if (err) {
+          reject(new Error('ACK_TIMEOUT'));
+          return;
+        }
+        if (ack.ok) {
+          resolve();
+        } else {
+          reject(new Error(ack.error.code));
+        }
+      });
+  });
 }
 
 // realtime-rules.md: 재연결 시 마지막 본 seq 이후 누락분 동기화.
