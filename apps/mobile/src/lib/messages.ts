@@ -1,5 +1,14 @@
 import type { ChatMessage, WsMessageDto } from '../api/types';
 
+// 마지막 본 seq — 재연결 동기화(messages:since)의 cursor. 없으면 0.
+export function maxSeq(messages: ChatMessage[]): number {
+  let max = 0;
+  for (const m of messages) {
+    if (m.seq > max) max = m.seq;
+  }
+  return max;
+}
+
 // WS payload는 id가 `messageId` 필드 — REST ChatMessage 모양으로 정규화.
 export function toChatMessage(dto: WsMessageDto): ChatMessage {
   return {

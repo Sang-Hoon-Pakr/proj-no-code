@@ -1,4 +1,4 @@
-import { mergeMessagesDesc, toChatMessage } from './messages';
+import { maxSeq, mergeMessagesDesc, toChatMessage } from './messages';
 import type { ChatMessage, WsMessageDto } from '../api/types';
 
 function msg(id: string, seq: number, content = 'x'): ChatMessage {
@@ -33,6 +33,16 @@ describe('mergeMessagesDesc', () => {
 
   it('빈 입력끼리 병합하면 빈 배열을 반환한다', () => {
     expect(mergeMessagesDesc([], [])).toEqual([]);
+  });
+});
+
+describe('maxSeq', () => {
+  it('메시지 중 가장 큰 seq를 반환한다', () => {
+    expect(maxSeq([msg('a', 3), msg('b', 7), msg('c', 5)])).toBe(7);
+  });
+
+  it('빈 목록이면 0을 반환한다 (since cursor 초기값)', () => {
+    expect(maxSeq([])).toBe(0);
   });
 });
 

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listRoomMessages } from '../../api/messages.api';
-import { sendMessage, subscribeNewMessages } from '../../realtime/socket';
-import { mergeMessagesDesc, toChatMessage } from '../../lib/messages';
+import {
+  fetchMessagesSince,
+  sendMessage,
+  subscribeConnected,
+  subscribeNewMessages,
+} from '../../realtime/socket';
+import { maxSeq, mergeMessagesDesc, toChatMessage } from '../../lib/messages';
 import { uuidv7 } from '../../lib/uuid';
 import { useAuth } from '../../store/auth';
 import type { ChatMessage } from '../../api/types';
@@ -45,6 +50,13 @@ export function useChatRoom(roomId: string): ChatRoomState {
   // 커서/중복요청 가드는 렌더에 안 쓰이므로 ref로 관리.
   const nextBeforeRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
+  // 마지막 본 seq — 재연결 catch-up의 since cursor.
+  const lastSeqRef = useRef(0);
+  const sinceInFlightRef = useRef(false);
+
+  useEffect(() => {
+    lastSeqRef.current = maxSeq(messages);
+  }, [messages]);
 
   const reload = useCallback((): void => {
     void (async () => {
@@ -99,6 +111,40 @@ export function useChatRoom(roomId: string): ChatRoomState {
       setMessages((prev) => mergeMessagesDesc(prev, [toChatMessage(dto)]));
     });
   }, [roomId]);
+
+  // realtime-rules.md: 재연결 시 마지막 본 seq 이후 누락분을 messages:since로 동기화.
+  const syncSince = useCallback((roomIdToSync: string): void => {
+    void (async () => {
+      if (sinceInFlightRef.current) return;
+      const startSeq = lastSeqRef.current;
+      // 아직 아무것도 못 본 상태(초기 로드 전)면 reload가 커버.
+      if (startSeq === 0) return;
+      sinceInFlightRef.current = true;
+      try {
+        let sinceSeq = startSeq;
+        let hasMore = true;
+        // 페이지 단위 catch-up — cursor가 앞 페이지 결과에 의존하는 의도된 직렬화.
+        while (hasMore) {
+          const res = await fetchMessagesSince({ roomId: roomIdToSync, sinceSeq });
+          if (res.messages.length === 0) break;
+          setMessages((prev) => mergeMessagesDesc(prev, res.messages.map(toChatMessage)));
+          sinceSeq = res.messages[res.messages.length - 1].seq;
+          hasMore = res.hasMore;
+        }
+      } catch (e) {
+        // 실패해도 다음 재연결 때 다시 시도된다.
+        if (__DEV__) console.warn('[useChatRoom] since sync failed', e);
+      } finally {
+        sinceInFlightRef.current = false;
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    return subscribeConnected(() => {
+      syncSince(roomId);
+    });
+  }, [roomId, syncSince]);
 
   // realtime-rules.md 전송 흐름: 즉시 표시(sending) → emit + ack 대기 →
   // ack 오면 확정 병합, 5초/에러 시 failed → 사용자 재시도.
