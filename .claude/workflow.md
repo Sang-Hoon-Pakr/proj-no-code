@@ -68,6 +68,7 @@ START → IMPLEMENT → TEST ──pass──→ STAGE DONE
   - 같은 ref에서 새 push 시 이전 실행 자동 취소.
   - main 브랜치 보호 룰로 CI 그린 강제 권장 (GitHub UI에서 설정).
 - 훅·CI 우회(`--no-verify`, GitHub admin override) 금지. 정 필요하면 별 branch + 사후 검증.
+- PR 생성 직후 `gh pr checks --watch`는 체크 등록 전이면 "no checks reported"로 즉시 exit 0 — 생성과 감시·머지를 한 체인에 묶지 말고 `gh pr merge --auto` 사용.
 - 실패 캡처는 **사람이 작성**. AI가 대신 채우면 이해 누락 위험.
 
 ## Stage 종료 체크리스트
